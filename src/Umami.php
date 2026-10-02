@@ -18,6 +18,19 @@ class Umami
     protected const CACHE_TOKEN = 'auth-token';
     protected const TOKEN_TTL = 60 * 12; // minutes
     protected const STATS_TTL = 10; // minutes
+    protected const ACTIVE_TTL = 1; // minutes
+
+    /** Period presets accepted by stats(), metrics() and series(). */
+    public const RANGES = ['24h', '7d', '30d', '90d'];
+
+    /** Breakdown types of Umami's metrics endpoint. `path` is `url` on Umami < 3. */
+    public const METRIC_TYPES = [
+        'path', 'url', 'entry', 'exit', 'title', 'hostname', 'query',
+        'referrer', 'channel',
+        'browser', 'os', 'device', 'screen', 'language',
+        'country', 'region', 'city',
+        'event', 'tag',
+    ];
 
     protected static ?Umami $instance = null;
 
@@ -296,30 +309,259 @@ class Umami
      */
     public function stats(string $range = '7d'): array
     {
-        $ranges = ['24h' => 60 * 60 * 24, '7d' => 60 * 60 * 24 * 7, '30d' => 60 * 60 * 24 * 30, '90d' => 60 * 60 * 24 * 90];
-        $seconds = $ranges[$range] ?? $ranges['7d'];
-        $range = isset($ranges[$range]) ? $range : '7d';
+        $period = $this->period($range);
 
         $cache = $this->kirby->cache('akibeo.umami');
-        $cacheKey = 'stats-' . $this->websiteId() . '-' . $range;
+        $cacheKey = 'stats-' . $this->websiteId() . '-' . $period['range'];
 
         if (($cached = $cache->get($cacheKey)) !== null) {
             return $cached;
         }
 
-        $endAt = time() * 1000;
-        $startAt = ($endAt - $seconds * 1000);
-
         $stats = static::normalizeStats($this->api('websites/' . $this->websiteId() . '/stats', [
-            'startAt' => $startAt,
-            'endAt' => $endAt,
+            'startAt' => $period['startAt'],
+            'endAt' => $period['endAt'],
         ]));
 
-        $result = ['range' => $range, 'startAt' => $startAt, 'endAt' => $endAt] + $stats;
+        $result = ['range' => $period['range'], 'startAt' => $period['startAt'], 'endAt' => $period['endAt']] + $stats;
 
         $cache->set($cacheKey, $result, static::STATS_TTL);
 
         return $result;
+    }
+
+    /**
+     * Resolves a range preset to Umami's millisecond timestamps. Unknown
+     * presets fall back to `7d`. The timestamps are rounded down to the
+     * minute so repeated requests within the cache TTL share a cache key.
+     *
+     * @return array{range: string, seconds: int, startAt: int, endAt: int, unit: string}
+     */
+    public function period(string $range): array
+    {
+        $seconds = [
+            '24h' => 60 * 60 * 24,
+            '7d' => 60 * 60 * 24 * 7,
+            '30d' => 60 * 60 * 24 * 30,
+            '90d' => 60 * 60 * 24 * 90,
+        ];
+
+        $range = isset($seconds[$range]) ? $range : '7d';
+        $endAt = intdiv(time(), 60) * 60 * 1000;
+
+        return [
+            'range' => $range,
+            'seconds' => $seconds[$range],
+            'startAt' => $endAt - $seconds[$range] * 1000,
+            'endAt' => $endAt,
+            'unit' => $range === '24h' ? 'hour' : 'day',
+        ];
+    }
+
+    /**
+     * One breakdown table of the dashboard: pages, referrers, browsers,
+     * countries, events, … (see METRIC_TYPES). Rows are sorted by Umami,
+     * most visitors first.
+     *
+     * @return array{range: string, type: string, total: int, rows: array<int, array{x: string, y: int, country?: string}>}
+     */
+    public function metrics(string $type, string $range = '7d', int $limit = 50): array
+    {
+        if (in_array($type, static::METRIC_TYPES, true) === false) {
+            throw new UmamiException('Unknown metric type "' . $type . '"');
+        }
+
+        $period = $this->period($range);
+        $limit = max(1, min(500, $limit));
+
+        $cache = $this->kirby->cache('akibeo.umami');
+        $cacheKey = 'metrics-' . $this->websiteId() . '-' . $type . '-' . $period['range'] . '-' . $limit;
+
+        if (($cached = $cache->get($cacheKey)) !== null) {
+            return $cached;
+        }
+
+        // Umami 3 renamed the `url` breakdown to `path`; older versions only
+        // know `url`. Try the requested name first and the other on a 400.
+        $types = match ($type) {
+            'path' => ['path', 'url'],
+            'url' => ['url', 'path'],
+            default => [$type],
+        };
+
+        $raw = [];
+
+        foreach ($types as $index => $try) {
+            try {
+                $raw = $this->api('websites/' . $this->websiteId() . '/metrics', [
+                    'startAt' => $period['startAt'],
+                    'endAt' => $period['endAt'],
+                    'type' => $try,
+                    'limit' => $limit,
+                ]);
+                break;
+            } catch (UmamiException $e) {
+                if ($e->status() !== 400 || $index === array_key_last($types)) {
+                    throw $e;
+                }
+            }
+        }
+
+        $rows = static::normalizeMetrics($raw);
+
+        $result = [
+            'range' => $period['range'],
+            'type' => $type,
+            'total' => array_sum(array_column($rows, 'y')),
+            'rows' => $rows,
+        ];
+
+        $cache->set($cacheKey, $result, static::STATS_TTL);
+
+        return $result;
+    }
+
+    /**
+     * Umami returns `[{x, y}]` (plus `country` for regions and cities).
+     * Keeps that shape, casts the numbers and drops rows without a label.
+     *
+     * @return array<int, array{x: string, y: int, country?: string}>
+     */
+    public static function normalizeMetrics(array $raw): array
+    {
+        $rows = [];
+
+        foreach ($raw as $row) {
+            if (is_array($row) === false) {
+                continue;
+            }
+
+            $label = trim((string)($row['x'] ?? ''));
+            $item = ['x' => $label === '' ? '(unknown)' : $label, 'y' => (int)($row['y'] ?? 0)];
+
+            if (isset($row['country']) && is_string($row['country']) && $row['country'] !== '') {
+                $item['country'] = $row['country'];
+            }
+
+            $rows[] = $item;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Pageviews and sessions over time for the chart: hourly buckets for
+     * `24h`, daily buckets otherwise. Every bucket of the period is present,
+     * zero-filled, in Kirby's configured timezone.
+     *
+     * @return array{range: string, unit: string, timezone: string, buckets: array<int, array{key: string, label: string, pageviews: int, sessions: int}>}
+     */
+    public function series(string $range = '7d'): array
+    {
+        $period = $this->period($range);
+        $timezone = date_default_timezone_get();
+
+        $cache = $this->kirby->cache('akibeo.umami');
+        $cacheKey = 'series-' . $this->websiteId() . '-' . $period['range'];
+
+        if (($cached = $cache->get($cacheKey)) !== null) {
+            return $cached;
+        }
+
+        $raw = $this->api('websites/' . $this->websiteId() . '/pageviews', [
+            'startAt' => $period['startAt'],
+            'endAt' => $period['endAt'],
+            'unit' => $period['unit'],
+            'timezone' => $timezone,
+        ]);
+
+        $result = [
+            'range' => $period['range'],
+            'unit' => $period['unit'],
+            'timezone' => $timezone,
+            'buckets' => static::normalizeSeries($raw, $period, $timezone),
+        ];
+
+        $cache->set($cacheKey, $result, static::STATS_TTL);
+
+        return $result;
+    }
+
+    /**
+     * Zero-fills the `{pageviews: [{x, y}], sessions: [{x, y}]}` response of
+     * the pageviews endpoint into one bucket per hour/day of the period.
+     * Umami labels buckets with the local date/time of the requested
+     * timezone (suffixed with "Z" although it is not UTC), so the labels are
+     * matched on their date/hour part without converting them.
+     *
+     * @return array<int, array{key: string, label: string, pageviews: int, sessions: int}>
+     */
+    public static function normalizeSeries(array $raw, array $period, string $timezone): array
+    {
+        $hourly = ($period['unit'] ?? 'day') === 'hour';
+        $keyLength = $hourly ? 13 : 10; // "2026-10-02T14" / "2026-10-02"
+
+        $index = [];
+        foreach (['pageviews', 'sessions'] as $metric) {
+            foreach ((array)($raw[$metric] ?? []) as $point) {
+                if (is_array($point) && isset($point['x'])) {
+                    $index[$metric][substr((string)$point['x'], 0, $keyLength)] = (int)($point['y'] ?? 0);
+                }
+            }
+        }
+
+        $tz = new \DateTimeZone($timezone);
+        $cursor = (new \DateTimeImmutable('@' . intdiv((int)$period['startAt'], 1000)))->setTimezone($tz);
+        $end = (new \DateTimeImmutable('@' . intdiv((int)$period['endAt'], 1000)))->setTimezone($tz);
+        $cursor = $hourly ? $cursor->setTime((int)$cursor->format('H'), 0) : $cursor->setTime(0, 0);
+        $step = new \DateInterval($hourly ? 'PT1H' : 'P1D');
+
+        $buckets = [];
+        while ($cursor <= $end) {
+            $key = $cursor->format($hourly ? 'Y-m-d\TH' : 'Y-m-d');
+            $buckets[] = [
+                'key' => $key,
+                'label' => $cursor->format($hourly ? 'H:i' : 'j M'),
+                'pageviews' => $index['pageviews'][$key] ?? 0,
+                'sessions' => $index['sessions'][$key] ?? 0,
+            ];
+            $cursor = $cursor->add($step);
+        }
+
+        return $buckets;
+    }
+
+    /**
+     * Visitors active in the last five minutes.
+     */
+    public function active(): int
+    {
+        $cache = $this->kirby->cache('akibeo.umami');
+        $cacheKey = 'active-' . $this->websiteId();
+
+        if (is_int($cached = $cache->get($cacheKey))) {
+            return $cached;
+        }
+
+        $raw = $this->api('websites/' . $this->websiteId() . '/active');
+        $active = static::normalizeActive($raw);
+
+        $cache->set($cacheKey, $active, static::ACTIVE_TTL);
+
+        return $active;
+    }
+
+    /**
+     * The active endpoint answers `{visitors: n}` on recent Umami versions
+     * and `[{x: n}]` on older ones.
+     */
+    public static function normalizeActive(array $raw): int
+    {
+        if (isset($raw['visitors'])) {
+            return (int)$raw['visitors'];
+        }
+
+        return (int)($raw[0]['x'] ?? $raw['x'] ?? 0);
     }
 
     /**
@@ -382,11 +624,11 @@ class Umami
         $json = json_decode($response->content(), true);
 
         if ($response->code() < 200 || $response->code() >= 300) {
-            throw new UmamiException(static::describeError($response->code(), $path, is_array($json) ? $json : []));
+            throw new UmamiException(static::describeError($response->code(), $path, is_array($json) ? $json : []), $response->code());
         }
 
         if (is_array($json) === false) {
-            throw new UmamiException('Umami API returned no JSON for ' . $path);
+            throw new UmamiException('Umami API returned no JSON for ' . $path, $response->code());
         }
 
         return $json;
@@ -463,7 +705,7 @@ class Umami
         $token = $json['token'] ?? null;
 
         if ($response->code() !== 200 || is_string($token) === false || $token === '') {
-            throw new UmamiException('Umami login failed (HTTP ' . $response->code() . '); check akibeo.umami.username/password');
+            throw new UmamiException('Umami login failed (HTTP ' . $response->code() . '); check akibeo.umami.username/password', $response->code());
         }
 
         $cache->set(static::CACHE_TOKEN, $token, static::TOKEN_TTL);

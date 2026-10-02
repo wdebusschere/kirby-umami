@@ -146,6 +146,92 @@ class UmamiTest extends TestCase
         );
     }
 
+    public function testPeriodFallsBackToSevenDaysAndPicksTheUnit(): void
+    {
+        $umami = $this->enabled();
+
+        $week = $umami->period('7d');
+        $this->assertSame('7d', $week['range']);
+        $this->assertSame('day', $week['unit']);
+        $this->assertSame(7 * 24 * 60 * 60 * 1000, $week['endAt'] - $week['startAt']);
+        $this->assertSame(0, $week['endAt'] % 60000, 'endAt is rounded to the minute');
+
+        $this->assertSame('hour', $umami->period('24h')['unit']);
+        $this->assertSame('7d', $umami->period('bogus')['range']);
+    }
+
+    public function testMetricsRejectsUnknownTypes(): void
+    {
+        $this->expectException(\Akibeo\Umami\UmamiException::class);
+        $this->enabled(['apiKey' => 'key'])->metrics('password', '7d');
+    }
+
+    public function testNormalizeMetricsKeepsLabelsCountsAndCountry(): void
+    {
+        $rows = Umami::normalizeMetrics([
+            ['x' => '/aanbod', 'y' => '12'],
+            ['x' => 'Amsterdam', 'y' => 3, 'country' => 'NL'],
+            ['x' => '', 'y' => 1],
+            'junk',
+        ]);
+
+        $this->assertSame([
+            ['x' => '/aanbod', 'y' => 12],
+            ['x' => 'Amsterdam', 'y' => 3, 'country' => 'NL'],
+            ['x' => '(unknown)', 'y' => 1],
+        ], $rows);
+    }
+
+    public function testNormalizeSeriesZeroFillsEveryBucket(): void
+    {
+        $period = [
+            'unit' => 'day',
+            'startAt' => (new \DateTimeImmutable('2026-10-01 10:00', new \DateTimeZone('Europe/Brussels')))->getTimestamp() * 1000,
+            'endAt' => (new \DateTimeImmutable('2026-10-04 10:00', new \DateTimeZone('Europe/Brussels')))->getTimestamp() * 1000,
+        ];
+
+        $buckets = Umami::normalizeSeries([
+            'pageviews' => [['x' => '2026-10-02T00:00:00Z', 'y' => 5], ['x' => '2026-10-04T00:00:00Z', 'y' => 2]],
+            'sessions' => [['x' => '2026-10-02T00:00:00Z', 'y' => 3]],
+        ], $period, 'Europe/Brussels');
+
+        $this->assertSame(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'], array_column($buckets, 'key'));
+        $this->assertSame(['1 Oct', '2 Oct', '3 Oct', '4 Oct'], array_column($buckets, 'label'));
+        $this->assertSame([0, 5, 0, 2], array_column($buckets, 'pageviews'));
+        $this->assertSame([0, 3, 0, 0], array_column($buckets, 'sessions'));
+    }
+
+    public function testNormalizeSeriesUsesHourlyBucketsForOneDay(): void
+    {
+        $period = [
+            'unit' => 'hour',
+            'startAt' => (new \DateTimeImmutable('2026-10-02 10:30', new \DateTimeZone('Europe/Brussels')))->getTimestamp() * 1000,
+            'endAt' => (new \DateTimeImmutable('2026-10-02 12:30', new \DateTimeZone('Europe/Brussels')))->getTimestamp() * 1000,
+        ];
+
+        $buckets = Umami::normalizeSeries([
+            'pageviews' => [['x' => '2026-10-02T11:00:00Z', 'y' => 7]],
+            'sessions' => [],
+        ], $period, 'Europe/Brussels');
+
+        $this->assertSame(['10:00', '11:00', '12:00'], array_column($buckets, 'label'));
+        $this->assertSame([0, 7, 0], array_column($buckets, 'pageviews'));
+    }
+
+    public function testNormalizeActiveHandlesBothResponseShapes(): void
+    {
+        $this->assertSame(30, Umami::normalizeActive(['visitors' => 30]));
+        $this->assertSame(4, Umami::normalizeActive([['x' => 4]]));
+        $this->assertSame(0, Umami::normalizeActive([]));
+    }
+
+    public function testExceptionCarriesTheHttpStatus(): void
+    {
+        $e = new \Akibeo\Umami\UmamiException('nope', 401);
+        $this->assertSame(401, $e->status());
+        $this->assertSame(0, (new \Akibeo\Umami\UmamiException('nope'))->status());
+    }
+
     public function testTrackReturnsFalseWhenDisabled(): void
     {
         $this->assertFalse($this->umami()->track('event'));

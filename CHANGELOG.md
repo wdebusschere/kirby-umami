@@ -6,6 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The "Analytics" Panel view is now a dashboard: visitors, visits,
+  pageviews, bounce rate and visit time with the change against the previous
+  period, visitors online right now, a pageviews/visits chart (hourly for
+  24h, daily otherwise) and breakdown tables with tabs for pages (pages,
+  entry, exit, titles), referrers (referrers, channels), environment
+  (browsers, OS, devices, screens), location (countries, regions, cities,
+  languages) and events. Country and city rows carry a flag, page rows link
+  to the site, long tables expand on demand. The chosen period is remembered.
+- `umami()->metrics($type, $range, $limit)` for one breakdown table (any of
+  `Umami::METRIC_TYPES`), `umami()->series($range)` for the zero-filled
+  pageviews/sessions buckets in Kirby's timezone and `umami()->active()` for
+  the live visitor count. All cached like `stats()`.
+- `GET /api/plugin/umami/metrics?type=…&range=…&limit=…` for the Panel; the
+  stats endpoint also returns `series` and `active`.
+- `UmamiException::status()` with the HTTP status of the failed response.
+
+### Changed
+
+- `url` and `path` are accepted as the pages breakdown: Umami 3 renamed the
+  type, the plugin retries with the other name on a 400.
+
 ### Fixed
 
 - API keys of a self-hosted Umami instance are sent as `Authorization: Bearer`,
