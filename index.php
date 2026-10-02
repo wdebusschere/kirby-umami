@@ -28,8 +28,9 @@ Kirby::plugin('akibeo/umami', [
         'nonce' => null,             // CSP nonce; defaults to cspNonce() from akibeo/kirby-csp when present
 
         // Umami API (Panel view + umami()->stats()). Either an API key
-        // (Umami Cloud, or a self-hosted instance that issues them) or a
-        // username/password of a self-hosted install.
+        // (Umami Cloud, or a self-hosted instance that issues them; sent as
+        // x-umami-api-key to Cloud and as a Bearer token to self-hosted
+        // installs) or a username/password of a self-hosted install.
         'apiUrl' => null,            // defaults to https://api.umami.is/v1 (cloud) or {hostUrl}/api
         'apiKey' => null,
         'username' => null,

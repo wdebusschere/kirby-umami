@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- API keys of a self-hosted Umami instance are sent as `Authorization: Bearer`,
+  which is what self-hosted Umami expects. They were sent as `x-umami-api-key`
+  (Umami Cloud's header) and every stats request answered 401. Cloud keeps
+  using `x-umami-api-key`.
+- API errors now include Umami's own error message and code (for example
+  `unauthorized` or `incorrect-username-password`) instead of only the HTTP
+  status, so the Panel shows why a request failed.
+
 ## [1.0.0] - 2026-10-02
 
 ### Added
