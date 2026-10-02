@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Breakdown table rows in the Analytics view lost their layout: the
+  background bar became a grid cell and pushed the label, count and share
+  into the wrong columns. The chart's axis numbers no longer overlap the
+  last bar.
+
 ### Added
 
 - The "Analytics" Panel view is now a dashboard: visitors, visits,
