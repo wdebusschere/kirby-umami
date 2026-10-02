@@ -117,6 +117,35 @@ class UmamiTest extends TestCase
         $this->assertTrue($this->enabled(['username' => 'admin', 'password' => 'secret'])->hasApi());
     }
 
+    public function testApiKeyHeaderDependsOnCloudOrSelfHosted(): void
+    {
+        $cloud = $this->enabled(['src' => 'https://cloud.umami.is/script.js', 'apiKey' => ' key ']);
+        $this->assertSame(['x-umami-api-key: key'], $cloud->authHeaders());
+
+        $hosted = $this->enabled(['apiKey' => 'key']);
+        $this->assertSame(['Authorization: Bearer key'], $hosted->authHeaders());
+    }
+
+    public function testDescribeErrorIncludesUmamisErrorCode(): void
+    {
+        $this->assertSame(
+            'Umami API responded with HTTP 401 for websites/abc/stats',
+            Umami::describeError(401, 'websites/abc/stats')
+        );
+        $this->assertSame(
+            'Umami API responded with HTTP 401 for websites/abc/stats (unauthorized)',
+            Umami::describeError(401, 'websites/abc/stats', ['error' => ['message' => 'Unauthorized', 'code' => 'unauthorized', 'status' => 401]])
+        );
+        $this->assertSame(
+            'Umami API responded with HTTP 401 for auth/login (unauthorized: incorrect-username-password)',
+            Umami::describeError(401, 'auth/login', ['error' => ['message' => 'Unauthorized', 'code' => 'incorrect-username-password']])
+        );
+        $this->assertSame(
+            'Umami API responded with HTTP 500 for x (boom)',
+            Umami::describeError(500, 'x', ['error' => 'boom'])
+        );
+    }
+
     public function testTrackReturnsFalseWhenDisabled(): void
     {
         $this->assertFalse($this->umami()->track('event'));

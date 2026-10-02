@@ -55,7 +55,7 @@ return [
 
         // Umami API, for the Panel view and umami()->stats()
         'apiUrl' => null,          // defaults to https://api.umami.is/v1 (cloud) or {hostUrl}/api
-        'apiKey' => null,          // Umami Cloud API key
+        'apiKey' => null,          // API key (Umami Cloud, or Settings > API keys on self-hosted)
         'username' => null,        // or the login of a self-hosted install
         'password' => null,
         'timeout' => 5,            // seconds, for every request to Umami

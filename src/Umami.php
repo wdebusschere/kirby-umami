@@ -379,11 +379,11 @@ class Umami
             ]);
         }
 
-        if ($response->code() < 200 || $response->code() >= 300) {
-            throw new UmamiException('Umami API responded with HTTP ' . $response->code() . ' for ' . $path);
-        }
-
         $json = json_decode($response->content(), true);
+
+        if ($response->code() < 200 || $response->code() >= 300) {
+            throw new UmamiException(static::describeError($response->code(), $path, is_array($json) ? $json : []));
+        }
 
         if (is_array($json) === false) {
             throw new UmamiException('Umami API returned no JSON for ' . $path);
@@ -392,12 +392,46 @@ class Umami
         return $json;
     }
 
-    protected function authHeaders(): array
+    /**
+     * Error message for a failed API call. Umami answers errors with
+     * `{error: {message, code, status}}`; the code (`unauthorized`,
+     * `incorrect-username-password`, …) is what tells a wrong key apart from
+     * a key without access to the website, so it is included when present.
+     */
+    public static function describeError(int $status, string $path, array $json = []): string
+    {
+        $message = 'Umami API responded with HTTP ' . $status . ' for ' . $path;
+        $error = $json['error'] ?? [];
+
+        if (is_string($error)) {
+            $error = ['message' => $error];
+        }
+
+        $details = array_filter([
+            trim((string)($error['message'] ?? '')),
+            trim((string)($error['code'] ?? '')),
+        ], fn (string $part) => $part !== '');
+
+        if ($details !== []) {
+            $message .= ' (' . implode(': ', array_unique(array_map('strtolower', $details))) . ')';
+        }
+
+        return $message;
+    }
+
+    /**
+     * Auth headers for the Umami API. Umami Cloud reads API keys from its
+     * own `x-umami-api-key` header; a self-hosted install expects the API
+     * key (or a login token) as a Bearer token and answers 401 otherwise.
+     */
+    public function authHeaders(): array
     {
         $apiKey = trim((string)$this->option('apiKey', ''));
 
         if ($apiKey !== '') {
-            return ['x-umami-api-key: ' . $apiKey];
+            return $this->isCloud()
+                ? ['x-umami-api-key: ' . $apiKey]
+                : ['Authorization: Bearer ' . $apiKey];
         }
 
         return ['Authorization: Bearer ' . $this->token()];
