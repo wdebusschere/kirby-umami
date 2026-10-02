@@ -150,32 +150,60 @@ could not be reached; it never throws.
 $stats = umami()->stats('30d'); // 24h, 7d, 30d, 90d
 // ['pageviews' => 1234, 'visitors' => 567, 'visits' => 600,
 //  'bounces' => 210, 'totaltime' => 41000, 'prev' => [...], ...]
+
+$pages = umami()->metrics('path', '7d', 10);
+// ['type' => 'path', 'total' => 900, 'rows' => [['x' => '/', 'y' => 400], …]]
+// Types: path (url on Umami < 3), entry, exit, title, hostname, query,
+// referrer, channel, browser, os, device, screen, language, country,
+// region, city, event, tag — see Umami::METRIC_TYPES.
+
+$series = umami()->series('7d');
+// ['unit' => 'day', 'timezone' => 'Europe/Brussels',
+//  'buckets' => [['key' => '2026-10-01', 'label' => '1 Oct', 'pageviews' => 120, 'sessions' => 80], …]]
+
+$online = umami()->active(); // visitors in the last five minutes
 ```
 
-Results are cached for 10 minutes. Throws `Akibeo\Umami\UmamiException`
-when the API is unreachable or the credentials are wrong. Any other
+Results are cached for 10 minutes (one minute for `active()`). All of them
+throw `Akibeo\Umami\UmamiException` when the API is unreachable or the
+credentials are wrong; `$e->status()` holds the HTTP status. Any other
 endpoint of the Umami API is reachable through `umami()->api('websites/…')`.
 
 ### Panel
 
-"Analytics" in the Panel menu. Without API credentials it only links to the
-Umami dashboard (and shows the share report if `shareUrl` is set). To embed
+"Analytics" in the Panel menu: the summary numbers with the change against
+the previous period, visitors online now, a pageviews chart and the
+breakdown tables of the Umami dashboard (pages, referrers, browsers,
+countries, events, …) for the last 24 hours, 7, 30 or 90 days. Without API
+credentials it only links to the Umami dashboard (and shows the share
+report if `shareUrl` is set). To embed
 the share report, the Umami instance has to allow framing by the Panel
 origin: set `ALLOWED_FRAME_URLS=https://www.example.com` in the Umami
 environment.
 
-### API endpoint
+### API endpoints
 
-`GET /api/plugin/umami/stats?range=7d` (Panel session required) returns the
-numbers the view shows:
+Both need a Panel session.
+
+`GET /api/plugin/umami/stats?range=7d` returns the summary, the live count
+and the chart series:
 
 ```json
 {
   "status": "success",
   "range": "7d",
-  "stats": { "pageviews": 1234, "visitors": 567, "visits": 600, "bounceRate": 35, "avgTime": "1m 8s" },
-  "prev": { "...": "same keys for the previous period" }
+  "stats": { "pageviews": 1234, "visitors": 567, "visits": 600, "bounceRate": 35, "avgTime": "1m 8s", "avgSeconds": 68 },
+  "prev": { "...": "same keys for the previous period" },
+  "active": 12,
+  "series": { "unit": "day", "timezone": "Europe/Brussels", "buckets": [{ "key": "2026-10-01", "label": "1 Oct", "pageviews": 120, "sessions": 80 }] }
 }
+```
+
+`GET /api/plugin/umami/metrics?type=country&range=7d&limit=50` returns one
+breakdown table:
+
+```json
+{ "status": "success", "range": "7d", "type": "country", "total": 567, "rows": [{ "x": "BE", "y": 280 }] }
 ```
 
 ## Development

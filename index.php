@@ -54,53 +54,91 @@ Kirby::plugin('akibeo/umami', [
     ],
 
     'api' => [
-        'routes' => [
-            [
-                'pattern' => 'plugin/umami/stats',
-                'method' => 'GET',
-                'action' => function () {
-                    $umami = Umami::instance();
-                    $range = (string)$this->requestQuery('range', '7d');
+        'routes' => (function () {
+            // Runs one API call for the Panel and turns every failure into
+            // a {status: 'error', message} answer the view can show.
+            $guard = function (callable $fn): array {
+                $umami = Umami::instance();
 
-                    if ($umami->hasApi() === false) {
-                        return [
-                            'status' => 'error',
-                            'message' => 'No Umami API credentials configured. Add akibeo.umami.apiKey or username/password to the config.',
-                        ];
-                    }
-
-                    try {
-                        $stats = $umami->stats($range);
-                    } catch (UmamiException $e) {
-                        return ['status' => 'error', 'message' => $e->getMessage()];
-                    } catch (Throwable $e) {
-                        return ['status' => 'error', 'message' => 'Could not reach Umami: ' . $e->getMessage()];
-                    }
-
-                    $visits = max(1, $stats['visits']);
-                    $prevVisits = max(1, $stats['prev']['visits'] ?? 0);
-
+                if ($umami->hasApi() === false) {
                     return [
-                        'status' => 'success',
-                        'range' => $stats['range'],
-                        'stats' => [
-                            'pageviews' => $stats['pageviews'],
-                            'visitors' => $stats['visitors'],
-                            'visits' => $stats['visits'],
-                            'bounceRate' => (int)round(min($stats['bounces'], $visits) / $visits * 100),
-                            'avgTime' => Umami::formatDuration((int)round($stats['totaltime'] / $visits)),
-                        ],
-                        'prev' => [
-                            'pageviews' => $stats['prev']['pageviews'] ?? 0,
-                            'visitors' => $stats['prev']['visitors'] ?? 0,
-                            'visits' => $stats['prev']['visits'] ?? 0,
-                            'bounceRate' => (int)round(min($stats['prev']['bounces'] ?? 0, $prevVisits) / $prevVisits * 100),
-                            'avgTime' => Umami::formatDuration((int)round(($stats['prev']['totaltime'] ?? 0) / $prevVisits)),
-                        ],
+                        'status' => 'error',
+                        'message' => 'No Umami API credentials configured. Add akibeo.umami.apiKey or username/password to the config.',
                     ];
                 }
-            ],
-        ],
+
+                try {
+                    return ['status' => 'success'] + $fn($umami);
+                } catch (UmamiException $e) {
+                    return ['status' => 'error', 'message' => $e->getMessage()];
+                } catch (Throwable $e) {
+                    return ['status' => 'error', 'message' => 'Could not reach Umami: ' . $e->getMessage()];
+                }
+            };
+
+            $summary = function (array $stats): array {
+                $visits = max(1, $stats['visits']);
+
+                return [
+                    'pageviews' => $stats['pageviews'],
+                    'visitors' => $stats['visitors'],
+                    'visits' => $stats['visits'],
+                    'bounceRate' => (int)round(min($stats['bounces'], $visits) / $visits * 100),
+                    'avgTime' => Umami::formatDuration((int)round($stats['totaltime'] / $visits)),
+                    'avgSeconds' => (int)round($stats['totaltime'] / $visits),
+                ];
+            };
+
+            return [
+                // Summary numbers, live visitors and the pageviews series
+                // of one period, in one request.
+                [
+                    'pattern' => 'plugin/umami/stats',
+                    'method' => 'GET',
+                    'action' => function () use ($guard, $summary) {
+                        $range = (string)$this->requestQuery('range', '7d');
+
+                        return $guard(function (Umami $umami) use ($range, $summary) {
+                            $stats = $umami->stats($range);
+
+                            $result = [
+                                'range' => $stats['range'],
+                                'stats' => $summary($stats),
+                                'prev' => $summary($stats['prev'] + ['pageviews' => 0, 'visitors' => 0, 'visits' => 0, 'bounces' => 0, 'totaltime' => 0]),
+                            ];
+
+                            // Chart and live count are extras: a failure
+                            // there should not take the numbers down.
+                            try {
+                                $result['series'] = $umami->series($range);
+                            } catch (Throwable $e) {
+                                $result['series'] = null;
+                            }
+
+                            try {
+                                $result['active'] = $umami->active();
+                            } catch (Throwable $e) {
+                                $result['active'] = null;
+                            }
+
+                            return $result;
+                        });
+                    }
+                ],
+                // One breakdown table: ?type=path|referrer|browser|country|…
+                [
+                    'pattern' => 'plugin/umami/metrics',
+                    'method' => 'GET',
+                    'action' => function () use ($guard) {
+                        $type = (string)$this->requestQuery('type', 'path');
+                        $range = (string)$this->requestQuery('range', '7d');
+                        $limit = (int)$this->requestQuery('limit', 50);
+
+                        return $guard(fn (Umami $umami) => $umami->metrics($type, $range, $limit));
+                    }
+                ],
+            ];
+        })(),
     ],
 
     'areas' => [
@@ -129,6 +167,7 @@ Kirby::plugin('akibeo/umami', [
                                 'dashboardUrl' => $umami->dashboardUrl(),
                                 'shareUrl' => $umami->option('shareUrl'),
                                 'hasApi' => $umami->hasApi(),
+                                'siteUrl' => $kirby->site()->url(),
                                 'trackInDebug' => $umami->option('trackInDebug', false) === true,
                                 'debug' => $kirby->option('debug') === true,
                             ],
