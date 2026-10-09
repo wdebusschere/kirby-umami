@@ -8,12 +8,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Analytics view is readable in the Panel's dark theme: cards, the
+  period toggle, badges, bars and tables now use theme-aware colours
+  instead of fixed white and light greys, which hid the numbers on a dark
+  background (#6).
 - Breakdown table rows in the Analytics view lost their layout: the
   background bar became a grid cell and pushed the label, count and share
   into the wrong columns. The chart's axis numbers no longer overlap the
   last bar.
 
 ### Added
+
+- Goals: the goals saved in Umami are listed in the Analytics view with
+  their conversions and conversion rate for the chosen period, next to the
+  events. The card only appears when the website has goals (#8).
+  `umami()->goals($range)` and `GET /api/plugin/umami/goals?range=…`
+  return the same list. Umami 3.4's goals API and the report API of
+  Umami 3.0 – 3.3 are both supported; `umami()->api()` can now send POST
+  requests with a JSON body for it.
 
 - The "Analytics" Panel view is now a dashboard: visitors, visits,
   pageviews, bounce rate and visit time with the change against the previous
@@ -33,6 +45,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The events table moved up: it sits right under the summary card, before
+  the pages, referrers, environment and location breakdowns (#7).
 - `url` and `path` are accepted as the pages breakdown: Umami 3 renamed the
   type, the plugin retries with the other name on a 400.
 

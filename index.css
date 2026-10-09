@@ -1,5 +1,45 @@
 /* Analytics view of akibeo/umami. Only Panel CSS variables are used so the
-   view follows the Panel theme. */
+   view follows the Panel theme. The dark theme of Kirby 5 keeps
+   `--color-white` white and does not invert the grey scale, so the colours
+   that differ between the themes are collected here and overridden for
+   `.k-panel[data-theme="dark"]`. The view's root element is the `.k-panel`
+   element itself (k-panel-inside renders into it), so both the element and
+   its descendants are matched. */
+
+.k-umami-view {
+  --umami-card-back: var(--item-color-back, var(--color-white));
+  --umami-hover-back: var(--table-color-hover, var(--color-gray-100));
+  --umami-muted-back: var(--color-gray-200);
+  --umami-ranges-back: var(--color-gray-200);
+  --umami-ranges-active: var(--color-white);
+  --umami-gridline: var(--color-gray-200);
+  --umami-pageviews: var(--color-blue-300);
+  --umami-sessions: var(--color-blue-600);
+  --umami-row-bar: var(--color-blue-200);
+  --umami-up-back: var(--color-green-200);
+  --umami-up-text: var(--color-green-800);
+  --umami-down-back: var(--color-red-200);
+  --umami-down-text: var(--color-red-800);
+  --umami-live-ring: var(--color-green-200);
+  --umami-error: var(--color-red-700);
+}
+
+.k-panel[data-theme="dark"].k-umami-view,
+.k-panel[data-theme="dark"] .k-umami-view {
+  --umami-muted-back: var(--color-gray-800);
+  --umami-ranges-back: var(--color-gray-950);
+  --umami-ranges-active: var(--color-gray-800);
+  --umami-gridline: var(--color-gray-800);
+  --umami-pageviews: var(--color-blue-700);
+  --umami-sessions: var(--color-blue-400);
+  --umami-row-bar: var(--color-blue-800);
+  --umami-up-back: var(--color-green-800);
+  --umami-up-text: var(--color-green-300);
+  --umami-down-back: var(--color-red-800);
+  --umami-down-text: var(--color-red-300);
+  --umami-live-ring: var(--color-green-800);
+  --umami-error: var(--color-red-400);
+}
 
 .k-umami-view .k-umami-toolbar {
   display: flex;
@@ -14,7 +54,7 @@
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  background: var(--color-gray-200);
+  background: var(--umami-ranges-back);
   border-radius: var(--rounded);
 }
 
@@ -31,7 +71,7 @@
 }
 
 .k-umami-view .k-umami-ranges button[aria-pressed="true"] {
-  background: var(--color-white);
+  background: var(--umami-ranges-active);
   color: var(--color-text);
   font-weight: var(--font-semi);
   box-shadow: var(--shadow);
@@ -56,13 +96,13 @@
   height: 0.5rem;
   border-radius: 50%;
   background: var(--color-green-500);
-  box-shadow: 0 0 0 3px var(--color-green-200);
+  box-shadow: 0 0 0 3px var(--umami-live-ring);
 }
 
 /* Cards */
 
 .k-umami-view .k-umami-card {
-  background: var(--color-white);
+  background: var(--umami-card-back);
   border: 1px solid var(--color-border);
   border-radius: var(--rounded-lg);
   padding: var(--spacing-5) var(--spacing-6);
@@ -118,19 +158,19 @@
   border-radius: var(--rounded);
   font-size: var(--text-xs);
   font-weight: var(--font-semi);
-  background: var(--color-gray-200);
+  background: var(--umami-muted-back);
   color: var(--color-text-dimmed);
   font-variant-numeric: tabular-nums;
 }
 
 .k-umami-view .k-umami-delta[data-trend="up"] {
-  background: var(--color-green-200);
-  color: var(--color-green-800);
+  background: var(--umami-up-back);
+  color: var(--umami-up-text);
 }
 
 .k-umami-view .k-umami-delta[data-trend="down"] {
-  background: var(--color-red-200);
-  color: var(--color-red-800);
+  background: var(--umami-down-back);
+  color: var(--umami-down-text);
 }
 
 .k-umami-view .k-umami-skeleton {
@@ -138,7 +178,7 @@
   height: 1.75rem;
   width: 4rem;
   border-radius: var(--rounded);
-  background: var(--color-gray-200);
+  background: var(--umami-muted-back);
 }
 
 /* Chart */
@@ -165,11 +205,11 @@
   border-radius: 2px;
   margin-right: var(--spacing-1);
   vertical-align: -1px;
-  background: var(--color-blue-300);
+  background: var(--umami-pageviews);
 }
 
 .k-umami-view .k-umami-legend span[data-series="sessions"]::before {
-  background: var(--color-blue-600);
+  background: var(--umami-sessions);
 }
 
 .k-umami-view .k-umami-bars {
@@ -185,7 +225,7 @@
 .k-umami-view .k-umami-bars-gridline {
   position: absolute;
   inset-inline: 0;
-  border-top: 1px dashed var(--color-gray-200);
+  border-top: 1px dashed var(--umami-gridline);
   pointer-events: none;
 }
 
@@ -194,7 +234,7 @@
   right: 0;
   top: 0;
   transform: translateY(-50%);
-  background: var(--color-white);
+  background: var(--umami-card-back);
   padding-left: var(--spacing-1);
   font-size: 10px;
   color: var(--color-text-dimmed);
@@ -209,7 +249,7 @@
 }
 
 .k-umami-view .k-umami-bar:hover {
-  background: var(--color-gray-100);
+  background: var(--umami-hover-back);
 }
 
 .k-umami-view .k-umami-bar i {
@@ -217,12 +257,12 @@
   inset-inline: 10%;
   bottom: 0;
   border-radius: 2px 2px 0 0;
-  background: var(--color-blue-300);
+  background: var(--umami-pageviews);
   transition: height 0.2s;
 }
 
 .k-umami-view .k-umami-bar i[data-series="sessions"] {
-  background: var(--color-blue-600);
+  background: var(--umami-sessions);
 }
 
 .k-umami-view .k-umami-axis {
@@ -262,7 +302,9 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .k-umami-view .k-umami-grid .k-umami-card:last-child:nth-child(odd) {
+  /* With an odd number of cards (no goals card) the first one, events,
+     spans the row; otherwise events and goals share it. */
+  .k-umami-view .k-umami-grid .k-umami-card:first-child:nth-last-child(odd) {
     grid-column: 1 / -1;
   }
 }
@@ -328,7 +370,7 @@
 }
 
 .k-umami-view .k-umami-row:hover {
-  background: var(--color-gray-100);
+  background: var(--umami-hover-back);
 }
 
 .k-umami-view .k-umami-row-bar {
@@ -336,7 +378,7 @@
   inset-block: 3px;
   left: 0;
   border-radius: var(--rounded-sm);
-  background: var(--color-blue-200);
+  background: var(--umami-row-bar);
   opacity: 0.55;
   pointer-events: none;
 }
@@ -408,7 +450,7 @@
 
 .k-umami-view .k-umami-table-error {
   padding: var(--spacing-3) var(--spacing-2);
-  color: var(--color-red-700);
+  color: var(--umami-error);
   font-size: var(--text-sm);
 }
 
@@ -417,7 +459,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--rounded-lg);
   overflow: hidden;
-  background: var(--color-white);
+  background: var(--umami-card-back);
 }
 
 .k-umami-view .k-umami-report iframe {

@@ -8,7 +8,7 @@
 - **CSP nonce** — picks up `cspNonce()` from [akibeo/kirby-csp](https://github.com/wdebusschere/kirby-csp) automatically.
 - **Off while developing** — nothing is tracked while Kirby's `debug` option is on.
 - **Server-side events** — `umami()->track('contact-form')` from PHP, for things that never reach the browser tracker (form endpoints, redirects).
-- **Panel view** — an "Analytics" entry with visitors, visits, pageviews, bounce rate and visit time for the last 24h / 7 / 30 / 90 days, a link to the Umami dashboard and, optionally, the embedded public share report.
+- **Panel view** — an "Analytics" entry with visitors, visits, pageviews, bounce rate and visit time for the last 24h / 7 / 30 / 90 days, the events, goals and breakdown tables of the Umami dashboard, a link to the Umami dashboard and, optionally, the embedded public share report. Follows the Panel's light and dark theme.
 - **Cloud or self-hosted** — works with Umami Cloud (API key) and self-hosted instances (API key or username/password).
 
 ## Installation
@@ -162,6 +162,13 @@ $series = umami()->series('7d');
 //  'buckets' => [['key' => '2026-10-01', 'label' => '1 Oct', 'pageviews' => 120, 'sessions' => 80], …]]
 
 $online = umami()->active(); // visitors in the last five minutes
+
+$goals = umami()->goals('7d');
+// ['goals' => [['id' => '…', 'name' => 'Contact form sent', 'description' => '',
+//   'type' => 'path', 'value' => '/contact/thanks',
+//   'conversions' => 23, 'visitors' => 567, 'rate' => 4.1], …]]
+// The goals saved in Umami (3.0 or newer), most conversions first; empty
+// on older versions. A goal whose result failed to load has 'error' set.
 ```
 
 Results are cached for 10 minutes (one minute for `active()`). All of them
@@ -172,18 +179,19 @@ endpoint of the Umami API is reachable through `umami()->api('websites/…')`.
 ### Panel
 
 "Analytics" in the Panel menu: the summary numbers with the change against
-the previous period, visitors online now, a pageviews chart and the
-breakdown tables of the Umami dashboard (pages, referrers, browsers,
-countries, events, …) for the last 24 hours, 7, 30 or 90 days. Without API
-credentials it only links to the Umami dashboard (and shows the share
-report if `shareUrl` is set). To embed
+the previous period, visitors online now, a pageviews chart, the events and
+the goals saved in Umami with their conversion rate, and the breakdown
+tables of the Umami dashboard (pages, referrers, browsers, countries, …) for
+the last 24 hours, 7, 30 or 90 days. The goals card only appears when the
+website has goals. Without API credentials it only links to the Umami
+dashboard (and shows the share report if `shareUrl` is set). To embed
 the share report, the Umami instance has to allow framing by the Panel
 origin: set `ALLOWED_FRAME_URLS=https://www.example.com` in the Umami
 environment.
 
 ### API endpoints
 
-Both need a Panel session.
+All of them need a Panel session.
 
 `GET /api/plugin/umami/stats?range=7d` returns the summary, the live count
 and the chart series:
@@ -204,6 +212,13 @@ breakdown table:
 
 ```json
 { "status": "success", "range": "7d", "type": "country", "total": 567, "rows": [{ "x": "BE", "y": 280 }] }
+```
+
+`GET /api/plugin/umami/goals?range=7d` returns the goals saved in Umami
+with their conversions in the period (an empty list when there are none):
+
+```json
+{ "status": "success", "range": "7d", "goals": [{ "id": "…", "name": "Contact form sent", "description": "", "type": "path", "value": "/contact/thanks", "conversions": 23, "visitors": 567, "rate": 4.1 }] }
 ```
 
 ## Development

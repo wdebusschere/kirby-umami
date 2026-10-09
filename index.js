@@ -6,10 +6,28 @@
     { value: '90d', label: '90 days', prev: 'previous 90 days' }
   ];
 
-  // Breakdown cards of the dashboard. `type` is the Umami metrics type the
-  // plugin's /api/plugin/umami/metrics endpoint accepts; `column` heads the
-  // first table column.
+  // Breakdown cards of the dashboard, in display order: events and goals
+  // sit right under the summary, the breakdowns follow. `type` is the Umami
+  // metrics type the plugin's /api/plugin/umami/metrics endpoint accepts;
+  // `column` heads the first table column and `count` the second (default
+  // "Visitors"). `goals` is not a metrics type: loadTable() reads it from
+  // /api/plugin/umami/goals and maps every goal onto the {x, y} row shape
+  // of the other tables; the card is only shown when the website has goals.
   const CARDS = [
+    {
+      key: 'events',
+      title: 'Events',
+      tabs: [
+        { type: 'event', label: 'Events', column: 'Event' }
+      ]
+    },
+    {
+      key: 'goals',
+      title: 'Goals',
+      tabs: [
+        { type: 'goals', label: 'Goals', column: 'Goal', count: 'Conversions' }
+      ]
+    },
     {
       key: 'pages',
       title: 'Pages',
@@ -46,13 +64,6 @@
         { type: 'region', label: 'Regions', column: 'Region' },
         { type: 'city', label: 'Cities', column: 'City' },
         { type: 'language', label: 'Languages', column: 'Language' }
-      ]
-    },
-    {
-      key: 'events',
-      title: 'Events',
-      tabs: [
-        { type: 'event', label: 'Events', column: 'Event' }
       ]
     }
   ];
@@ -275,7 +286,7 @@
               </section>
 
               <div class="k-umami-grid">
-                <section v-for="card in cards" :key="card.key" class="k-umami-card">
+                <section v-for="card in visibleCards" :key="card.key" class="k-umami-card">
                   <div class="k-umami-card-header">
                     <h2 class="k-umami-card-title">{{ card.title }}</h2>
                   </div>
@@ -295,7 +306,7 @@
                   <div class="k-umami-table">
                     <div class="k-umami-table-head">
                       <span>{{ card.tabs[card.tab].column }}</span>
-                      <span style="text-align: right;">Visitors</span>
+                      <span style="text-align: right;">{{ card.tabs[card.tab].count || 'Visitors' }}</span>
                       <span></span>
                     </div>
 
@@ -370,14 +381,19 @@
         },
         data() {
           let range = '7d';
+          // Whether the website had goals the last time they were loaded,
+          // so the goals card is in place from the first paint on instead
+          // of pushing the grid around once the goals arrive.
+          let hasGoals = false;
 
           try {
             const stored = window.localStorage.getItem('akibeo.umami.range');
             if (RANGES.some((option) => option.value === stored)) {
               range = stored;
             }
+            hasGoals = window.localStorage.getItem('akibeo.umami.hasGoals') === '1';
           } catch (error) {
-            // localStorage unavailable, keep the default
+            // localStorage unavailable, keep the defaults
           }
 
           return {
@@ -389,6 +405,7 @@
             series: null,
             range,
             ranges: RANGES,
+            hasGoals,
             pageSize: 10,
             cards: CARDS.map((card) => ({ ...card, tab: 0, expanded: false })),
             // Breakdown tables keyed by "<type>:<range>".
@@ -398,6 +415,20 @@
         computed: {
           rangeInfo() {
             return RANGES.find((option) => option.value === this.range) || RANGES[1];
+          },
+          goalsCard() {
+            return this.cards.find((card) => card.key === 'goals');
+          },
+          // The goals card is shown when the website has goals (as far as
+          // the last loaded answer knows, so it stays put while a period
+          // or a refresh loads) or when loading them failed.
+          goalsVisible() {
+            const current = this.table(this.goalsCard);
+
+            return this.hasGoals || !!current.error || current.rows.length > 0;
+          },
+          visibleCards() {
+            return this.cards.filter((card) => card.key !== 'goals' || this.goalsVisible);
           },
           tiles() {
             const stats = this.stats || {};
@@ -501,12 +532,16 @@
 
             return rows.map((row, index) => {
               const formatted = this.formatRow(tab.type, row);
+              // A goal's share is its conversion rate, as Umami shows it.
+              const percent = tab.type === 'goals'
+                ? row.rate
+                : Math.min(100, Math.round((row.y / denominator) * 100));
 
               return {
                 key: index + ':' + row.x,
                 count: row.y,
-                share: (row.y / max) * 100,
-                percent: Math.min(100, Math.round((row.y / denominator) * 100)),
+                share: tab.type === 'goals' ? percent : (row.y / max) * 100,
+                percent,
                 ...formatted
               };
             });
@@ -543,6 +578,18 @@
                   href: null,
                   flag: flag(row.country)
                 };
+              case 'goals': {
+                const page = row.type === 'path' || row.type === 'url';
+                const target = (page ? 'Page ' : 'Event ') + row.value;
+                const title = row.description ? target + ' (' + row.description + ')' : target;
+
+                return {
+                  label: value,
+                  title: row.error ? title + '. Not loaded: ' + row.error : title,
+                  href: page && !row.value.includes('*') ? this.pageUrl(row.value) : null,
+                  flag: ''
+                };
+              }
               default:
                 return { label: value, title: value, href: null, flag: '' };
             }
@@ -607,13 +654,39 @@
             this.$set(this.tables, key, { loading: true, error: null, rows: [], total: 0 });
 
             try {
-              const response = await this.$api.get('plugin/umami/metrics', { type, range: this.range, limit: 50 });
+              const response = type === 'goals'
+                ? await this.$api.get('plugin/umami/goals', { range: this.range })
+                : await this.$api.get('plugin/umami/metrics', { type, range: this.range, limit: 50 });
 
               if (response.status !== 'success') {
                 throw new Error(response.message || 'Could not load ' + type);
               }
 
-              this.$set(this.tables, key, { loading: false, error: null, rows: response.rows, total: response.total });
+              const rows = type === 'goals'
+                ? response.goals.map((goal) => ({
+                    x: goal.name,
+                    y: goal.conversions,
+                    rate: goal.rate,
+                    visitors: goal.visitors,
+                    type: goal.type,
+                    value: goal.value,
+                    description: goal.description,
+                    error: goal.error || null
+                  }))
+                : response.rows;
+              const total = type === 'goals' ? rows.length : response.total;
+
+              if (type === 'goals') {
+                this.hasGoals = rows.length > 0;
+
+                try {
+                  window.localStorage.setItem('akibeo.umami.hasGoals', this.hasGoals ? '1' : '0');
+                } catch (error) {
+                  // ignore
+                }
+              }
+
+              this.$set(this.tables, key, { loading: false, error: null, rows, total });
             } catch (error) {
               this.$set(this.tables, key, { loading: false, error: error.message || 'Could not load ' + type, rows: [], total: 0 });
             }

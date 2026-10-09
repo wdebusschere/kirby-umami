@@ -3,6 +3,7 @@
 namespace Akibeo\Umami\Tests;
 
 use Akibeo\Umami\Umami;
+use Akibeo\Umami\UmamiException;
 
 class UmamiTest extends TestCase
 {
@@ -216,6 +217,184 @@ class UmamiTest extends TestCase
 
         $this->assertSame(['10:00', '11:00', '12:00'], array_column($buckets, 'label'));
         $this->assertSame([0, 7, 0], array_column($buckets, 'pageviews'));
+    }
+
+    /**
+     * An Umami whose api() answers from a map of path => response (an
+     * UmamiException is thrown instead of returned) and records every call.
+     */
+    protected function stubbed(array $responses): Umami
+    {
+        $kirby = $this->kirby(['akibeo.umami' => [
+            'enabled' => true,
+            'websiteId' => 'abc-123',
+            'src' => 'https://stats.example.com/script.js',
+            'apiKey' => 'key',
+        ]]);
+
+        return new class ($kirby, $responses) extends Umami {
+            public array $calls = [];
+            public array $queries = [];
+            public array $bodies = [];
+
+            public function __construct(\Kirby\Cms\App $kirby, protected array $responses)
+            {
+                parent::__construct($kirby);
+            }
+
+            public function api(string $path, array $query = [], string $method = 'GET', ?array $data = null): array
+            {
+                $this->calls[] = $method . ' ' . $path;
+                $this->queries[$path] = $query;
+                $this->bodies[$path] = $data;
+
+                $response = $this->responses[$path] ?? new UmamiException('No stub for ' . $path, 404);
+
+                if ($response instanceof \Throwable) {
+                    throw $response;
+                }
+
+                return $response;
+            }
+        };
+    }
+
+    public function testNormalizeGoalsReadsDefinitionsAndDropsIncompleteRows(): void
+    {
+        $goals = Umami::normalizeGoals([
+            'data' => [
+                ['id' => 'g1', 'name' => 'Thank you page', 'description' => 'Form sent', 'parameters' => ['type' => 'path', 'value' => '/thank-you']],
+                ['id' => 'g2', 'name' => '', 'parameters' => ['type' => 'event', 'value' => ' signup ']],
+                ['id' => '', 'name' => 'No id', 'parameters' => ['type' => 'path', 'value' => '/x']],
+                ['id' => 'g3', 'name' => 'Umami 2 report', 'parameters' => ['goals' => [['type' => 'url', 'value' => '/']]]],
+                'junk',
+            ],
+            'count' => 4,
+        ]);
+
+        $this->assertSame([
+            ['id' => 'g1', 'name' => 'Thank you page', 'description' => 'Form sent', 'type' => 'path', 'value' => '/thank-you'],
+            ['id' => 'g2', 'name' => 'signup', 'description' => '', 'type' => 'event', 'value' => 'signup'],
+        ], $goals);
+
+        $this->assertSame([], Umami::normalizeGoals([]));
+        $this->assertSame([], Umami::normalizeGoals(['data' => null]));
+        $this->assertSame('path', Umami::normalizeGoals([['id' => 'g', 'parameters' => ['value' => '/']]])[0]['type']);
+    }
+
+    public function testNormalizeGoalStatsComputesTheRate(): void
+    {
+        $this->assertSame(['conversions' => 12, 'visitors' => 300, 'rate' => 4.0], Umami::normalizeGoalStats(['num' => '12', 'total' => 300]));
+        $this->assertSame(['conversions' => 0, 'visitors' => 0, 'rate' => 0.0], Umami::normalizeGoalStats([]));
+        $this->assertSame(1.7, Umami::normalizeGoalStats([['num' => 1, 'total' => 60]])['rate']);
+    }
+
+    public function testGoalsUseTheGoalsApiOfUmami34(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => ['data' => [
+                ['id' => 'g1', 'name' => 'Signup', 'description' => '', 'parameters' => ['type' => 'event', 'value' => 'signup']],
+                ['id' => 'g2', 'name' => 'Thanks', 'description' => '', 'parameters' => ['type' => 'path', 'value' => '/thank-you']],
+            ], 'count' => 2],
+            'websites/abc-123/goals/g1/stats' => ['num' => 3, 'total' => 30],
+            'websites/abc-123/goals/g2/stats' => ['num' => 0, 'total' => 30],
+        ]);
+
+        $result = $umami->goals('30d');
+
+        $this->assertSame('30d', $result['range']);
+        $this->assertSame(['Signup', 'Thanks'], array_column($result['goals'], 'name'));
+        $this->assertSame([3, 0], array_column($result['goals'], 'conversions'));
+        $this->assertSame([10.0, 0.0], array_column($result['goals'], 'rate'));
+        $this->assertArrayNotHasKey('error', $result['goals'][0]);
+        $this->assertSame([
+            'GET websites/abc-123/goals',
+            'GET websites/abc-123/goals/g1/stats',
+            'GET websites/abc-123/goals/g2/stats',
+        ], $umami->calls);
+
+        $period = $umami->period('30d');
+        $this->assertSame(['startAt' => $period['startAt'], 'endAt' => $period['endAt']], $umami->queries['websites/abc-123/goals/g1/stats']);
+    }
+
+    public function testGoalsFallBackToTheReportApiOfOlderUmami(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => new UmamiException('not found', 404),
+            'reports' => ['data' => [
+                ['id' => 'r1', 'name' => 'Signup', 'parameters' => ['type' => 'event', 'value' => 'signup']],
+            ]],
+            'reports/goal' => ['num' => 1, 'total' => 4],
+        ]);
+
+        $result = $umami->goals('7d');
+
+        $this->assertSame(['GET websites/abc-123/goals', 'GET reports', 'POST reports/goal'], $umami->calls);
+        $this->assertSame(['websiteId' => 'abc-123', 'type' => 'goal', 'pageSize' => 50], $umami->queries['reports']);
+        $this->assertSame(25.0, $result['goals'][0]['rate']);
+
+        $body = $umami->bodies['reports/goal'];
+        $this->assertSame('abc-123', $body['websiteId']);
+        $this->assertSame('goal', $body['type']);
+        $this->assertSame('{}', json_encode($body['filters']));
+        $this->assertSame('event', $body['parameters']['type']);
+        $this->assertSame('signup', $body['parameters']['value']);
+        $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $body['parameters']['startDate']);
+        $this->assertLessThan($body['parameters']['endDate'], $body['parameters']['startDate']);
+    }
+
+    public function testGoalsAreEmptyWhenUmamiHasNoGoalsApi(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => new UmamiException('not found', 404),
+            'reports' => new UmamiException('bad request', 400),
+        ]);
+
+        $this->assertSame(['range' => '7d', 'goals' => []], $umami->goals('7d'));
+    }
+
+    public function testGoalsPassOtherErrorsOn(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => new UmamiException('unauthorized', 401),
+        ]);
+
+        $this->expectException(UmamiException::class);
+        $this->expectExceptionMessage('unauthorized');
+        $umami->goals('7d');
+    }
+
+    public function testGoalsDoNotMistakeABadRequestForAMissingGoalsApi(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => new UmamiException('bad request', 400),
+            'reports' => ['data' => [['id' => 'r1', 'name' => 'x', 'parameters' => ['type' => 'event', 'value' => 'x']]]],
+        ]);
+
+        $this->expectException(UmamiException::class);
+        $this->expectExceptionMessage('bad request');
+        $umami->goals('7d');
+    }
+
+    public function testGoalsAreSortedByConversionsAndKeepFailedOnes(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => ['data' => [
+                ['id' => 'g1', 'name' => 'Broken', 'parameters' => ['type' => 'event', 'value' => 'broken']],
+                ['id' => 'g2', 'name' => 'Big', 'parameters' => ['type' => 'event', 'value' => 'big']],
+                ['id' => 'g3', 'name' => 'Small', 'parameters' => ['type' => 'event', 'value' => 'small']],
+            ]],
+            'websites/abc-123/goals/g1/stats' => new UmamiException('server error', 500),
+            'websites/abc-123/goals/g2/stats' => ['num' => 9, 'total' => 30],
+            'websites/abc-123/goals/g3/stats' => ['num' => 2, 'total' => 30],
+        ]);
+
+        $goals = $umami->goals('7d')['goals'];
+
+        $this->assertSame(['Big', 'Small', 'Broken'], array_column($goals, 'name'));
+        $this->assertSame([9, 2, 0], array_column($goals, 'conversions'));
+        $this->assertSame('server error', $goals[2]['error']);
+        $this->assertArrayNotHasKey('error', $goals[0]);
     }
 
     public function testNormalizeActiveHandlesBothResponseShapes(): void
