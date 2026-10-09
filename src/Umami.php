@@ -532,6 +532,157 @@ class Umami
     }
 
     /**
+     * The goals saved in Umami for the website, each with its result in
+     * the period: `conversions` is the number of visitors who reached the
+     * goal, `visitors` the number of visitors in the period and `rate` the
+     * percentage. `type` is `path` for a page goal and `event` for an event
+     * goal, `value` the page path or event name.
+     *
+     * Umami 3.4 lists goals at websites/{id}/goals and computes one at
+     * websites/{id}/goals/{goalId}/stats; Umami 3.0 – 3.3 keep them as
+     * reports of type `goal` and compute them through POST reports/goal.
+     * Both are read, and an instance without any goals API (older Umami)
+     * answers an empty list instead of an error.
+     *
+     * @return array{range: string, goals: array<int, array{id: string, name: string, description: string, type: string, value: string, conversions: int, visitors: int, rate: float}>}
+     */
+    public function goals(string $range = '7d'): array
+    {
+        $period = $this->period($range);
+
+        $cache = $this->kirby->cache('akibeo.umami');
+        $cacheKey = 'goals-' . $this->websiteId() . '-' . $period['range'];
+
+        if (($cached = $cache->get($cacheKey)) !== null) {
+            return $cached;
+        }
+
+        [$goals, $legacy] = $this->goalDefinitions();
+
+        foreach ($goals as &$goal) {
+            $raw = $legacy
+                ? $this->api('reports/goal', [], 'POST', [
+                    'websiteId' => $this->websiteId(),
+                    'type' => 'goal',
+                    'filters' => new \stdClass(), // `{}`: Umami validates it as an object
+                    'parameters' => [
+                        'startDate' => gmdate('Y-m-d\TH:i:s\Z', intdiv($period['startAt'], 1000)),
+                        'endDate' => gmdate('Y-m-d\TH:i:s\Z', intdiv($period['endAt'], 1000)),
+                        'type' => $goal['type'],
+                        'value' => $goal['value'],
+                    ],
+                ])
+                : $this->api('websites/' . $this->websiteId() . '/goals/' . $goal['id'] . '/stats', [
+                    'startAt' => $period['startAt'],
+                    'endAt' => $period['endAt'],
+                ]);
+
+            $goal += static::normalizeGoalStats($raw);
+        }
+        unset($goal);
+
+        $result = ['range' => $period['range'], 'goals' => $goals];
+
+        $cache->set($cacheKey, $result, static::STATS_TTL);
+
+        return $result;
+    }
+
+    /**
+     * The saved goal definitions, and whether they come from the report
+     * API of Umami < 3.4 (whose results are read with POST reports/goal).
+     * A 400/404/405 means the instance has no such API: no goals then.
+     *
+     * @return array{0: array<int, array{id: string, name: string, description: string, type: string, value: string}>, 1: bool}
+     */
+    protected function goalDefinitions(): array
+    {
+        $websiteId = $this->websiteId();
+        $missing = [400, 404, 405];
+
+        try {
+            return [static::normalizeGoals($this->api('websites/' . $websiteId . '/goals', ['pageSize' => 100])), false];
+        } catch (UmamiException $e) {
+            if (in_array($e->status(), $missing, true) === false) {
+                throw $e;
+            }
+        }
+
+        try {
+            return [static::normalizeGoals($this->api('reports', ['websiteId' => $websiteId, 'type' => 'goal', 'pageSize' => 100])), true];
+        } catch (UmamiException $e) {
+            if (in_array($e->status(), $missing, true) === false) {
+                throw $e;
+            }
+        }
+
+        return [[], false];
+    }
+
+    /**
+     * Goal definitions as Umami lists them: `{data: [{id, name, description,
+     * parameters: {type, value}}], count, …}` (a bare list is accepted too).
+     * Rows without an id or a target are dropped; that includes the goal
+     * reports of Umami 2, which hold several targets per report.
+     *
+     * @return array<int, array{id: string, name: string, description: string, type: string, value: string}>
+     */
+    public static function normalizeGoals(array $raw): array
+    {
+        $rows = isset($raw['data']) && is_array($raw['data']) ? $raw['data'] : $raw;
+        $goals = [];
+
+        foreach ($rows as $row) {
+            if (is_array($row) === false) {
+                continue;
+            }
+
+            $parameters = is_array($row['parameters'] ?? null) ? $row['parameters'] : [];
+            $id = trim((string)($row['id'] ?? ''));
+            $value = trim((string)($parameters['value'] ?? ''));
+
+            if ($id === '' || $value === '') {
+                continue;
+            }
+
+            $name = trim((string)($row['name'] ?? ''));
+            $type = trim((string)($parameters['type'] ?? ''));
+
+            $goals[] = [
+                'id' => $id,
+                'name' => $name !== '' ? $name : $value,
+                'description' => trim((string)($row['description'] ?? '')),
+                'type' => $type !== '' ? $type : 'path',
+                'value' => $value,
+            ];
+        }
+
+        return $goals;
+    }
+
+    /**
+     * The `{num, total}` answer of a goal query: visitors who reached the
+     * goal, and all visitors of the period.
+     *
+     * @return array{conversions: int, visitors: int, rate: float}
+     */
+    public static function normalizeGoalStats(array $raw): array
+    {
+        if (isset($raw[0]) && is_array($raw[0])) {
+            $raw = $raw[0];
+        }
+
+        $conversions = (int)($raw['num'] ?? 0);
+        $visitors = (int)($raw['total'] ?? 0);
+
+        return [
+            'conversions' => $conversions,
+            'visitors' => $visitors,
+            'rate' => $visitors > 0 ? round($conversions / $visitors * 100, 1) : 0.0,
+        ];
+    }
+
+    /**
      * Visitors active in the last five minutes.
      */
     public function active(): int
@@ -590,10 +741,14 @@ class Umami
     }
 
     /**
-     * GET request against the Umami API. Throws on transport errors, auth
+     * Request against the Umami API. Throws on transport errors, auth
      * failures or non-JSON responses so the Panel can show the reason.
+     *
+     * @param array $query Query string parameters
+     * @param string $method `GET` or `POST`
+     * @param array|null $data JSON body of a POST request
      */
-    public function api(string $path, array $query = []): array
+    public function api(string $path, array $query = [], string $method = 'GET', ?array $data = null): array
     {
         if ($this->hasApi() === false) {
             throw new UmamiException('No Umami API credentials configured (akibeo.umami.apiKey or username/password)');
@@ -604,21 +759,28 @@ class Umami
             $url .= '?' . http_build_query($query);
         }
 
-        $response = Remote::request($url, [
-            'method' => 'GET',
-            'timeout' => (int)$this->option('timeout', 5),
-            'headers' => array_merge(['Accept: application/json'], $this->authHeaders()),
-        ]);
+        $request = function () use ($url, $method, $data) {
+            $options = [
+                'method' => $method,
+                'timeout' => (int)$this->option('timeout', 5),
+                'headers' => array_merge(['Accept: application/json'], $this->authHeaders()),
+            ];
+
+            if ($data !== null) {
+                $options['headers'][] = 'Content-Type: application/json';
+                $options['data'] = json_encode($data);
+            }
+
+            return Remote::request($url, $options);
+        };
+
+        $response = $request();
 
         if ($response->code() === 401 && trim((string)$this->option('apiKey', '')) === '') {
             // Token expired or was revoked: log in again once.
             $this->kirby->cache('akibeo.umami')->remove(static::CACHE_TOKEN);
 
-            $response = Remote::request($url, [
-                'method' => 'GET',
-                'timeout' => (int)$this->option('timeout', 5),
-                'headers' => array_merge(['Accept: application/json'], $this->authHeaders()),
-            ]);
+            $response = $request();
         }
 
         $json = json_decode($response->content(), true);

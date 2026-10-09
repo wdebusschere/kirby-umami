@@ -137,6 +137,17 @@ Kirby::plugin('akibeo/umami', [
                         return $guard(fn (Umami $umami) => $umami->metrics($type, $range, $limit));
                     }
                 ],
+                // The goals saved in Umami, each with its conversions in
+                // the period. Empty when the website has none.
+                [
+                    'pattern' => 'plugin/umami/goals',
+                    'method' => 'GET',
+                    'action' => function () use ($guard) {
+                        $range = (string)$this->requestQuery('range', '7d');
+
+                        return $guard(fn (Umami $umami) => $umami->goals($range));
+                    }
+                ],
             ];
         })(),
     ],
