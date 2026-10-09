@@ -167,7 +167,8 @@ $goals = umami()->goals('7d');
 // ['goals' => [['id' => '…', 'name' => 'Contact form sent', 'description' => '',
 //   'type' => 'path', 'value' => '/contact/thanks',
 //   'conversions' => 23, 'visitors' => 567, 'rate' => 4.1], …]]
-// The goals saved in Umami (3.0 or newer); empty on older versions.
+// The goals saved in Umami (3.0 or newer), most conversions first; empty
+// on older versions. A goal whose result failed to load has 'error' set.
 ```
 
 Results are cached for 10 minutes (one minute for `active()`). All of them

@@ -20,6 +20,9 @@ class Umami
     protected const STATS_TTL = 10; // minutes
     protected const ACTIVE_TTL = 1; // minutes
 
+    /** Goals read per request; every goal costs one Umami API call. */
+    public const GOALS_LIMIT = 50;
+
     /** Period presets accepted by stats(), metrics() and series(). */
     public const RANGES = ['24h', '7d', '30d', '90d'];
 
@@ -536,7 +539,9 @@ class Umami
      * the period: `conversions` is the number of visitors who reached the
      * goal, `visitors` the number of visitors in the period and `rate` the
      * percentage. `type` is `path` for a page goal and `event` for an event
-     * goal, `value` the page path or event name.
+     * goal, `value` the page path or event name. Goals are sorted by
+     * conversions, most first. A goal whose result could not be read keeps
+     * zeros and carries the reason in `error`; the others are unaffected.
      *
      * Umami 3.4 lists goals at websites/{id}/goals and computes one at
      * websites/{id}/goals/{goalId}/stats; Umami 3.0 – 3.3 keep them as
@@ -544,7 +549,7 @@ class Umami
      * Both are read, and an instance without any goals API (older Umami)
      * answers an empty list instead of an error.
      *
-     * @return array{range: string, goals: array<int, array{id: string, name: string, description: string, type: string, value: string, conversions: int, visitors: int, rate: float}>}
+     * @return array{range: string, goals: array<int, array{id: string, name: string, description: string, type: string, value: string, conversions: int, visitors: int, rate: float, error?: string}>}
      */
     public function goals(string $range = '7d'): array
     {
@@ -560,26 +565,32 @@ class Umami
         [$goals, $legacy] = $this->goalDefinitions();
 
         foreach ($goals as &$goal) {
-            $raw = $legacy
-                ? $this->api('reports/goal', [], 'POST', [
-                    'websiteId' => $this->websiteId(),
-                    'type' => 'goal',
-                    'filters' => new \stdClass(), // `{}`: Umami validates it as an object
-                    'parameters' => [
-                        'startDate' => gmdate('Y-m-d\TH:i:s\Z', intdiv($period['startAt'], 1000)),
-                        'endDate' => gmdate('Y-m-d\TH:i:s\Z', intdiv($period['endAt'], 1000)),
-                        'type' => $goal['type'],
-                        'value' => $goal['value'],
-                    ],
-                ])
-                : $this->api('websites/' . $this->websiteId() . '/goals/' . $goal['id'] . '/stats', [
-                    'startAt' => $period['startAt'],
-                    'endAt' => $period['endAt'],
-                ]);
+            try {
+                $raw = $legacy
+                    ? $this->api('reports/goal', [], 'POST', [
+                        'websiteId' => $this->websiteId(),
+                        'type' => 'goal',
+                        'filters' => new \stdClass(), // `{}`: Umami validates it as an object
+                        'parameters' => [
+                            'startDate' => gmdate('Y-m-d\TH:i:s\Z', intdiv($period['startAt'], 1000)),
+                            'endDate' => gmdate('Y-m-d\TH:i:s\Z', intdiv($period['endAt'], 1000)),
+                            'type' => $goal['type'],
+                            'value' => $goal['value'],
+                        ],
+                    ])
+                    : $this->api('websites/' . $this->websiteId() . '/goals/' . $goal['id'] . '/stats', [
+                        'startAt' => $period['startAt'],
+                        'endAt' => $period['endAt'],
+                    ]);
 
-            $goal += static::normalizeGoalStats($raw);
+                $goal += static::normalizeGoalStats($raw);
+            } catch (UmamiException $e) {
+                $goal += static::normalizeGoalStats([]) + ['error' => $e->getMessage()];
+            }
         }
         unset($goal);
+
+        usort($goals, fn (array $a, array $b) => [$b['conversions'], $a['name']] <=> [$a['conversions'], $b['name']]);
 
         $result = ['range' => $period['range'], 'goals' => $goals];
 
@@ -591,27 +602,28 @@ class Umami
     /**
      * The saved goal definitions, and whether they come from the report
      * API of Umami < 3.4 (whose results are read with POST reports/goal).
-     * A 400/404/405 means the instance has no such API: no goals then.
+     * Without the goals route (404/405) the report API is tried; when that
+     * is missing too, or rejects `type=goal` with a 400 as Umami 2 does,
+     * the instance has no goals. Any other error is passed on.
      *
      * @return array{0: array<int, array{id: string, name: string, description: string, type: string, value: string}>, 1: bool}
      */
     protected function goalDefinitions(): array
     {
         $websiteId = $this->websiteId();
-        $missing = [400, 404, 405];
 
         try {
-            return [static::normalizeGoals($this->api('websites/' . $websiteId . '/goals', ['pageSize' => 100])), false];
+            return [static::normalizeGoals($this->api('websites/' . $websiteId . '/goals', ['pageSize' => static::GOALS_LIMIT])), false];
         } catch (UmamiException $e) {
-            if (in_array($e->status(), $missing, true) === false) {
+            if (in_array($e->status(), [404, 405], true) === false) {
                 throw $e;
             }
         }
 
         try {
-            return [static::normalizeGoals($this->api('reports', ['websiteId' => $websiteId, 'type' => 'goal', 'pageSize' => 100])), true];
+            return [static::normalizeGoals($this->api('reports', ['websiteId' => $websiteId, 'type' => 'goal', 'pageSize' => static::GOALS_LIMIT])), true];
         } catch (UmamiException $e) {
-            if (in_array($e->status(), $missing, true) === false) {
+            if (in_array($e->status(), [400, 404, 405], true) === false) {
                 throw $e;
             }
         }
@@ -768,7 +780,7 @@ class Umami
 
             if ($data !== null) {
                 $options['headers'][] = 'Content-Type: application/json';
-                $options['data'] = json_encode($data);
+                $options['data'] = json_encode($data, JSON_THROW_ON_ERROR);
             }
 
             return Remote::request($url, $options);

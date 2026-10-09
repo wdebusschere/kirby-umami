@@ -306,6 +306,7 @@ class UmamiTest extends TestCase
         $this->assertSame(['Signup', 'Thanks'], array_column($result['goals'], 'name'));
         $this->assertSame([3, 0], array_column($result['goals'], 'conversions'));
         $this->assertSame([10.0, 0.0], array_column($result['goals'], 'rate'));
+        $this->assertArrayNotHasKey('error', $result['goals'][0]);
         $this->assertSame([
             'GET websites/abc-123/goals',
             'GET websites/abc-123/goals/g1/stats',
@@ -329,7 +330,7 @@ class UmamiTest extends TestCase
         $result = $umami->goals('7d');
 
         $this->assertSame(['GET websites/abc-123/goals', 'GET reports', 'POST reports/goal'], $umami->calls);
-        $this->assertSame(['websiteId' => 'abc-123', 'type' => 'goal', 'pageSize' => 100], $umami->queries['reports']);
+        $this->assertSame(['websiteId' => 'abc-123', 'type' => 'goal', 'pageSize' => 50], $umami->queries['reports']);
         $this->assertSame(25.0, $result['goals'][0]['rate']);
 
         $body = $umami->bodies['reports/goal'];
@@ -361,6 +362,39 @@ class UmamiTest extends TestCase
         $this->expectException(UmamiException::class);
         $this->expectExceptionMessage('unauthorized');
         $umami->goals('7d');
+    }
+
+    public function testGoalsDoNotMistakeABadRequestForAMissingGoalsApi(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => new UmamiException('bad request', 400),
+            'reports' => ['data' => [['id' => 'r1', 'name' => 'x', 'parameters' => ['type' => 'event', 'value' => 'x']]]],
+        ]);
+
+        $this->expectException(UmamiException::class);
+        $this->expectExceptionMessage('bad request');
+        $umami->goals('7d');
+    }
+
+    public function testGoalsAreSortedByConversionsAndKeepFailedOnes(): void
+    {
+        $umami = $this->stubbed([
+            'websites/abc-123/goals' => ['data' => [
+                ['id' => 'g1', 'name' => 'Broken', 'parameters' => ['type' => 'event', 'value' => 'broken']],
+                ['id' => 'g2', 'name' => 'Big', 'parameters' => ['type' => 'event', 'value' => 'big']],
+                ['id' => 'g3', 'name' => 'Small', 'parameters' => ['type' => 'event', 'value' => 'small']],
+            ]],
+            'websites/abc-123/goals/g1/stats' => new UmamiException('server error', 500),
+            'websites/abc-123/goals/g2/stats' => ['num' => 9, 'total' => 30],
+            'websites/abc-123/goals/g3/stats' => ['num' => 2, 'total' => 30],
+        ]);
+
+        $goals = $umami->goals('7d')['goals'];
+
+        $this->assertSame(['Big', 'Small', 'Broken'], array_column($goals, 'name'));
+        $this->assertSame([9, 2, 0], array_column($goals, 'conversions'));
+        $this->assertSame('server error', $goals[2]['error']);
+        $this->assertArrayNotHasKey('error', $goals[0]);
     }
 
     public function testNormalizeActiveHandlesBothResponseShapes(): void

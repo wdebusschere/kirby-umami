@@ -381,14 +381,19 @@
         },
         data() {
           let range = '7d';
+          // Whether the website had goals the last time they were loaded,
+          // so the goals card is in place from the first paint on instead
+          // of pushing the grid around once the goals arrive.
+          let hasGoals = false;
 
           try {
             const stored = window.localStorage.getItem('akibeo.umami.range');
             if (RANGES.some((option) => option.value === stored)) {
               range = stored;
             }
+            hasGoals = window.localStorage.getItem('akibeo.umami.hasGoals') === '1';
           } catch (error) {
-            // localStorage unavailable, keep the default
+            // localStorage unavailable, keep the defaults
           }
 
           return {
@@ -400,6 +405,7 @@
             series: null,
             range,
             ranges: RANGES,
+            hasGoals,
             pageSize: 10,
             cards: CARDS.map((card) => ({ ...card, tab: 0, expanded: false })),
             // Breakdown tables keyed by "<type>:<range>".
@@ -413,24 +419,13 @@
           goalsCard() {
             return this.cards.find((card) => card.key === 'goals');
           },
-          // The goals card is shown once the website turns out to have
-          // goals, or when loading them failed. While a new period loads,
-          // it stays if an earlier period had goals, so the grid does not
-          // jump.
+          // The goals card is shown when the website has goals (as far as
+          // the last loaded answer knows, so it stays put while a period
+          // or a refresh loads) or when loading them failed.
           goalsVisible() {
             const current = this.table(this.goalsCard);
 
-            if (current.error || current.rows.length) {
-              return true;
-            }
-
-            if (!current.loading) {
-              return false;
-            }
-
-            return Object.keys(this.tables).some(
-              (key) => key.startsWith('goals:') && this.tables[key].rows.length > 0
-            );
+            return this.hasGoals || !!current.error || current.rows.length > 0;
           },
           visibleCards() {
             return this.cards.filter((card) => card.key !== 'goals' || this.goalsVisible);
@@ -586,10 +581,11 @@
               case 'goals': {
                 const page = row.type === 'path' || row.type === 'url';
                 const target = (page ? 'Page ' : 'Event ') + row.value;
+                const title = row.description ? target + ' (' + row.description + ')' : target;
 
                 return {
                   label: value,
-                  title: row.description ? target + ' (' + row.description + ')' : target,
+                  title: row.error ? title + '. Not loaded: ' + row.error : title,
                   href: page && !row.value.includes('*') ? this.pageUrl(row.value) : null,
                   flag: ''
                 };
@@ -674,10 +670,21 @@
                     visitors: goal.visitors,
                     type: goal.type,
                     value: goal.value,
-                    description: goal.description
+                    description: goal.description,
+                    error: goal.error || null
                   }))
                 : response.rows;
               const total = type === 'goals' ? rows.length : response.total;
+
+              if (type === 'goals') {
+                this.hasGoals = rows.length > 0;
+
+                try {
+                  window.localStorage.setItem('akibeo.umami.hasGoals', this.hasGoals ? '1' : '0');
+                } catch (error) {
+                  // ignore
+                }
+              }
 
               this.$set(this.tables, key, { loading: false, error: null, rows, total });
             } catch (error) {
