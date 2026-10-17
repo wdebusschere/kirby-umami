@@ -23,6 +23,9 @@ class Umami
     /** Goals read per request; every goal costs one Umami API call. */
     public const GOALS_LIMIT = 50;
 
+    /** Global name of the inline before-send helper, see beforeSendTag(). */
+    public const BEFORE_SEND = 'akibeoUmamiBeforeSend';
+
     /** Period presets accepted by stats(), metrics() and series(). */
     public const RANGES = ['24h', '7d', '30d', '90d'];
 
@@ -157,7 +160,64 @@ class Umami
             $attrs['data-exclude-hash'] = 'true';
         }
 
+        if (($beforeSend = $this->beforeSendName()) !== null) {
+            $attrs['data-before-send'] = $beforeSend;
+        }
+
         return $attrs;
+    }
+
+    /**
+     * Name of the global JS function Umami calls before every send: the
+     * plugin's own helper while `utmFromClickIds` is on (it chains to the
+     * `beforeSend` option), otherwise the `beforeSend` option itself.
+     */
+    public function beforeSendName(): ?string
+    {
+        if ($this->utmFromClickIds() === true) {
+            return static::BEFORE_SEND;
+        }
+
+        $name = trim((string)$this->option('beforeSend', ''));
+
+        return $name !== '' ? $name : null;
+    }
+
+    public function utmFromClickIds(): bool
+    {
+        return $this->option('utmFromClickIds', true) === true;
+    }
+
+    /**
+     * The inline helper behind `utmFromClickIds`: when the tracked URL
+     * carries a paid click ID (Google's gclid/gbraid/wbraid/gad_source,
+     * Microsoft's msclkid, TikTok's ttclid, LinkedIn's li_fat_id, X's
+     * twclid) but no utm_source, it adds utm_source/utm_medium (and
+     * utm_campaign from gad_campaignid) to the URL Umami receives. Umami
+     * only files visits under campaigns by their UTM parameters, so
+     * auto-tagged ad clicks would otherwise never show up there. The real
+     * URL in the browser is untouched; Umami still gets the click ID too.
+     *
+     * Empty string when the helper is off.
+     */
+    public function beforeSendTag(): string
+    {
+        if ($this->utmFromClickIds() !== true) {
+            return '';
+        }
+
+        $next = trim((string)$this->option('beforeSend', ''));
+        $next = $next !== '' ? json_encode($next, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null';
+        $name = static::BEFORE_SEND;
+        $nonce = ($nonce = $this->nonce()) !== null
+            ? ' nonce="' . htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8') . '"'
+            : '';
+
+        $js = <<<JS
+window.{$name}=function(t,p){var n={$next};try{if(p&&p.url){var u=new URL(p.url,location.href),q=u.searchParams;if(!q.has("utm_source")){var m=[["google",["gclid","gbraid","wbraid","gad_source","gad_campaignid"]],["bing",["msclkid"]],["tiktok",["ttclid"]],["linkedin",["li_fat_id"]],["twitter",["twclid"]]];for(var i=0;i<m.length;i++){if(m[i][1].some(function(k){return q.has(k)})){q.set("utm_source",m[i][0]);q.has("utm_medium")||q.set("utm_medium","cpc");!q.has("utm_campaign")&&q.get("gad_campaignid")&&q.set("utm_campaign",q.get("gad_campaignid"));p.url=/^[a-z][a-z0-9+.-]*:/i.test(p.url)?u.href:u.pathname+u.search+u.hash;break}}}}}catch(e){}return n&&"function"==typeof window[n]?window[n](t,p):p};
+JS;
+
+        return '<script' . $nonce . '>' . $js . '</script>';
     }
 
     /**
@@ -176,7 +236,7 @@ class Umami
                 : ' ' . $name . '="' . htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '"';
         }
 
-        return '<script' . $html . '></script>';
+        return $this->beforeSendTag() . '<script' . $html . '></script>';
     }
 
     protected function nonce(): ?string

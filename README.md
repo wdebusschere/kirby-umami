@@ -48,6 +48,8 @@ return [
         'tag' => null,             // tag every view, to filter in the dashboard
         'excludeSearch' => false,  // drop ?query from tracked URLs
         'excludeHash' => false,    // drop #hash from tracked URLs
+        'utmFromClickIds' => true, // file auto-tagged ad clicks under utm_source/utm_medium (see note)
+        'beforeSend' => null,      // name of your own (type, payload) => payload JS function
 
         'trackInDebug' => false,   // also track while option('debug') is true
         'trackPanelUsers' => true, // false: skip logged-in Panel users (see note)
@@ -85,7 +87,8 @@ Keep secrets (`apiKey`, `password`) in a host config
 ### Content-Security-Policy
 
 With [akibeo/kirby-csp](https://github.com/wdebusschere/kirby-csp) the script
-tag carries the per-request nonce, so `script-src` needs nothing extra. The
+tag and the inline `utmFromClickIds` helper carry the per-request nonce, so
+`script-src` needs nothing extra. The
 tracker posts to `/api/send` on the Umami host, so add that host to
 `connect-src`:
 
@@ -99,6 +102,31 @@ tracker posts to `/api/send` on the Umami host, so add that host to
 
 Without kirby-csp, set `'nonce' => fn () => myNonce()` (a callable is
 resolved per request) or leave it `null`.
+
+### Ad clicks without UTM parameters
+
+Umami files a visit under a campaign only by its `utm_*` parameters. Google
+Ads auto-tagging adds `gclid`, `gbraid` and `gad_*` instead, so those visits
+show up as "Paid Ads" in the channels but never in the UTM report. With
+`utmFromClickIds` on (the default) the tag carries a small inline helper,
+registered as Umami's `data-before-send`, that adds `utm_source`,
+`utm_medium=cpc` and, for Google, `utm_campaign` from `gad_campaignid` to the
+URL Umami receives whenever it sees a paid click ID and no `utm_source`:
+
+| Click ID                                      | utm_source |
+| --------------------------------------------- | ---------- |
+| `gclid`, `gbraid`, `wbraid`, `gad_source`     | `google`   |
+| `msclkid`                                     | `bing`     |
+| `ttclid`                                      | `tiktok`   |
+| `li_fat_id`                                   | `linkedin` |
+| `twclid`                                      | `twitter`  |
+
+Manual UTM tags always win, the browser URL is not changed and the click ID
+still reaches Umami. The helper carries the same nonce as the tracker. With
+`excludeSearch` on, the tracker strips the query before the helper runs, so
+there is nothing to pick up. Set `beforeSend` to the name of your own global
+function to run it after the helper (or instead of it, when `utmFromClickIds`
+is off).
 
 ### `trackPanelUsers` and the pages cache
 

@@ -32,8 +32,40 @@ class UmamiTest extends TestCase
     {
         $this->assertSame(
             '<script defer src="https://stats.example.com/script.js" data-website-id="abc-123"></script>',
-            $this->enabled()->scriptTag()
+            $this->enabled(['utmFromClickIds' => false])->scriptTag()
         );
+    }
+
+    public function testScriptTagCarriesTheClickIdHelperByDefault(): void
+    {
+        $tag = $this->enabled()->scriptTag();
+
+        $this->assertStringStartsWith('<script>window.akibeoUmamiBeforeSend=function(t,p){var n=null;', $tag);
+        $this->assertStringEndsWith(
+            '<script defer src="https://stats.example.com/script.js" data-website-id="abc-123" data-before-send="akibeoUmamiBeforeSend"></script>',
+            $tag
+        );
+        $this->assertStringContainsString('"gclid","gbraid","wbraid","gad_source","gad_campaignid"', $tag);
+    }
+
+    public function testClickIdHelperChainsToBeforeSendAndTakesTheNonce(): void
+    {
+        $umami = $this->enabled(['beforeSend' => ' my</script>Fn ', 'nonce' => 'n1']);
+
+        $this->assertSame('akibeoUmamiBeforeSend', $umami->beforeSendName());
+        $this->assertStringStartsWith(
+            '<script nonce="n1">window.akibeoUmamiBeforeSend=function(t,p){var n="my\u003C\/script\u003EFn";',
+            $umami->beforeSendTag()
+        );
+    }
+
+    public function testBeforeSendOptionAloneIsPassedThrough(): void
+    {
+        $umami = $this->enabled(['utmFromClickIds' => false, 'beforeSend' => 'myFn']);
+
+        $this->assertSame('', $umami->beforeSendTag());
+        $this->assertSame('myFn', $umami->scriptAttributes()['data-before-send']);
+        $this->assertArrayNotHasKey('data-before-send', $this->enabled(['utmFromClickIds' => false])->scriptAttributes());
     }
 
     public function testScriptTagIsSkippedInDebugUnlessTrackInDebug(): void
@@ -51,6 +83,7 @@ class UmamiTest extends TestCase
             'tag' => 'campaign',
             'excludeSearch' => true,
             'excludeHash' => true,
+            'utmFromClickIds' => false,
         ])->scriptAttributes();
 
         $this->assertSame([

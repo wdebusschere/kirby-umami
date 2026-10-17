@@ -23,6 +23,8 @@ Kirby::plugin('akibeo/umami', [
         'tag' => null,               // Umami's data-tag, to filter views in the dashboard
         'excludeSearch' => false,    // drop the query string from tracked URLs
         'excludeHash' => false,      // drop the hash from tracked URLs
+        'utmFromClickIds' => true,   // file auto-tagged ad clicks (gclid, msclkid, …) under utm_source/utm_medium
+        'beforeSend' => null,        // name of a global JS function (type, payload) => payload, Umami's data-before-send
         'trackInDebug' => false,     // also load the tracker while Kirby's debug option is on
         'trackPanelUsers' => true,   // false: no tracker for logged-in Panel users (mind the pages cache)
         'nonce' => null,             // CSP nonce; defaults to cspNonce() from akibeo/kirby-csp when present
