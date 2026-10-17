@@ -19,6 +19,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `utmFromClickIds` (on by default): an inline helper registered as Umami's
+  `data-before-send` adds `utm_source`/`utm_medium=cpc` (and `utm_campaign`
+  from `gad_campaignid`) to the tracked URL when an auto-tagged ad click
+  (`gclid`, `gbraid`, `wbraid`, `gad_source`, `msclkid`, `ttclid`,
+  `li_fat_id`, `twclid`) arrives without UTM parameters, so Google Ads and
+  other paid visits appear in Umami's UTM report. Manual UTMs win, the
+  browser URL is untouched. `beforeSend` names your own before-send function,
+  chained after the helper.
 - Goals: the goals saved in Umami are listed in the Analytics view with
   their conversions and conversion rate for the chosen period, next to the
   events. The card only appears when the website has goals (#8).
