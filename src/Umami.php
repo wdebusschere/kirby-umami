@@ -169,12 +169,13 @@ class Umami
 
     /**
      * Name of the global JS function Umami calls before every send: the
-     * plugin's own helper while `utmFromClickIds` is on (it chains to the
-     * `beforeSend` option), otherwise the `beforeSend` option itself.
+     * plugin's own helper while `excludeBots` or `utmFromClickIds` is on (it
+     * chains to the `beforeSend` option), otherwise the `beforeSend` option
+     * itself.
      */
     public function beforeSendName(): ?string
     {
-        if ($this->utmFromClickIds() === true) {
+        if ($this->hasBeforeSendHelper() === true) {
             return static::BEFORE_SEND;
         }
 
@@ -188,11 +189,29 @@ class Umami
         return $this->option('utmFromClickIds', true) === true;
     }
 
+    public function excludeBots(): bool
+    {
+        return $this->option('excludeBots', true) === true;
+    }
+
+    protected function hasBeforeSendHelper(): bool
+    {
+        return $this->excludeBots() === true || $this->utmFromClickIds() === true;
+    }
+
     /**
-     * The inline helper behind `utmFromClickIds`: when the tracked URL
-     * carries a paid click ID (Google's gclid/gbraid/wbraid/gad_source,
-     * Microsoft's msclkid, TikTok's ttclid, LinkedIn's li_fat_id, X's
-     * twclid) but no utm_source, it adds utm_source/utm_medium (and
+     * The inline helper behind `excludeBots` and `utmFromClickIds`.
+     *
+     * `excludeBots` cancels the send (Umami drops the event when the
+     * before-send function returns a falsy value) in browsers that report
+     * themselves as automated: `navigator.webdriver` is set by Puppeteer,
+     * Playwright and Selenium, and headless Chrome says so in its
+     * user agent. Neither is ever true for a real visitor. Stealth setups
+     * hide both, so this catches the careless share of scrapers only.
+     *
+     * `utmFromClickIds`: when the tracked URL carries a paid click ID
+     * (Google's gclid/gbraid/wbraid/gad_source, Microsoft's msclkid,
+     * TikTok's ttclid, LinkedIn's li_fat_id, X's twclid) but no utm_source, it adds utm_source/utm_medium (and
      * utm_campaign from gad_campaignid) to the URL Umami receives. Umami
      * only files visits under campaigns by their UTM parameters, so
      * auto-tagged ad clicks would otherwise never show up there. The real
@@ -202,7 +221,7 @@ class Umami
      */
     public function beforeSendTag(): string
     {
-        if ($this->utmFromClickIds() !== true) {
+        if ($this->hasBeforeSendHelper() !== true) {
             return '';
         }
 
@@ -213,9 +232,17 @@ class Umami
             ? ' nonce="' . htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8') . '"'
             : '';
 
-        $js = <<<JS
-window.{$name}=function(t,p){var n={$next};try{if(p&&p.url){var u=new URL(p.url,location.href),q=u.searchParams;if(!q.has("utm_source")){var m=[["google",["gclid","gbraid","wbraid","gad_source","gad_campaignid"]],["bing",["msclkid"]],["tiktok",["ttclid"]],["linkedin",["li_fat_id"]],["twitter",["twclid"]]];for(var i=0;i<m.length;i++){if(m[i][1].some(function(k){return q.has(k)})){q.set("utm_source",m[i][0]);q.has("utm_medium")||q.set("utm_medium","cpc");!q.has("utm_campaign")&&q.get("gad_campaignid")&&q.set("utm_campaign",q.get("gad_campaignid"));p.url=/^[a-z][a-z0-9+.-]*:/i.test(p.url)?u.href:u.pathname+u.search+u.hash;break}}}}}catch(e){}return n&&"function"==typeof window[n]?window[n](t,p):p};
-JS;
+        $bots = $this->excludeBots() === true
+            ? 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))return false;'
+            : '';
+        $utm = $this->utmFromClickIds() === true
+            ? <<<'JS'
+try{if(p&&p.url){var u=new URL(p.url,location.href),q=u.searchParams;if(!q.has("utm_source")){var m=[["google",["gclid","gbraid","wbraid","gad_source","gad_campaignid"]],["bing",["msclkid"]],["tiktok",["ttclid"]],["linkedin",["li_fat_id"]],["twitter",["twclid"]]];for(var i=0;i<m.length;i++){if(m[i][1].some(function(k){return q.has(k)})){q.set("utm_source",m[i][0]);q.has("utm_medium")||q.set("utm_medium","cpc");!q.has("utm_campaign")&&q.get("gad_campaignid")&&q.set("utm_campaign",q.get("gad_campaignid"));p.url=/^[a-z][a-z0-9+.-]*:/i.test(p.url)?u.href:u.pathname+u.search+u.hash;break}}}}}catch(e){}
+JS
+            : '';
+
+        $js = 'window.' . $name . '=function(t,p){var n=' . $next . ';' . $bots . $utm
+            . 'return n&&"function"==typeof window[n]?window[n](t,p):p};';
 
         return '<script' . $nonce . '>' . $js . '</script>';
     }

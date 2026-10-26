@@ -48,6 +48,7 @@ return [
         'tag' => null,             // tag every view, to filter in the dashboard
         'excludeSearch' => false,  // drop ?query from tracked URLs
         'excludeHash' => false,    // drop #hash from tracked URLs
+        'excludeBots' => true,     // don't track automated/headless browsers (see note)
         'utmFromClickIds' => true, // file auto-tagged ad clicks under utm_source/utm_medium (see note)
         'beforeSend' => null,      // name of your own (type, payload) => payload JS function
 
@@ -87,7 +88,7 @@ Keep secrets (`apiKey`, `password`) in a host config
 ### Content-Security-Policy
 
 With [akibeo/kirby-csp](https://github.com/wdebusschere/kirby-csp) the script
-tag and the inline `utmFromClickIds` helper carry the per-request nonce, so
+tag and the inline before-send helper (`excludeBots`, `utmFromClickIds`) carry the per-request nonce, so
 `script-src` needs nothing extra. The
 tracker posts to `/api/send` on the Umami host, so add that host to
 `connect-src`:
@@ -102,6 +103,18 @@ tracker posts to `/api/send` on the Umami host, so add that host to
 
 Without kirby-csp, set `'nonce' => fn () => myNonce()` (a callable is
 resolved per request) or leave it `null`.
+
+### Headless-browser bots
+
+Scrapers that drive a real browser run the tracker like any visitor and can
+inflate the numbers several times over. With `excludeBots` on (the default)
+the tag carries a small inline helper, registered as Umami's
+`data-before-send`, that cancels every send when the browser reports itself
+as automated: `navigator.webdriver` is `true` (Puppeteer, Playwright,
+Selenium) or the user agent contains `HeadlessChrome`. No real visitor
+matches either, so there are no false positives, but stealth setups hide
+both and still get through. This only stops new hits; Umami cannot remove
+what it has already recorded.
 
 ### Ad clicks without UTM parameters
 
@@ -125,8 +138,8 @@ Manual UTM tags always win, the browser URL is not changed and the click ID
 still reaches Umami. The helper carries the same nonce as the tracker. With
 `excludeSearch` on, the tracker strips the query before the helper runs, so
 there is nothing to pick up. Set `beforeSend` to the name of your own global
-function to run it after the helper (or instead of it, when `utmFromClickIds`
-is off).
+function to run it after the helper (or instead of it, when both
+`excludeBots` and `utmFromClickIds` are off).
 
 ### `trackPanelUsers` and the pages cache
 

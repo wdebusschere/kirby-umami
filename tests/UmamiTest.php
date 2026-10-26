@@ -32,7 +32,7 @@ class UmamiTest extends TestCase
     {
         $this->assertSame(
             '<script defer src="https://stats.example.com/script.js" data-website-id="abc-123"></script>',
-            $this->enabled(['utmFromClickIds' => false])->scriptTag()
+            $this->enabled(['utmFromClickIds' => false, 'excludeBots' => false])->scriptTag()
         );
     }
 
@@ -48,6 +48,47 @@ class UmamiTest extends TestCase
         $this->assertStringContainsString('"gclid","gbraid","wbraid","gad_source","gad_campaignid"', $tag);
     }
 
+    public function testHelperCancelsAutomatedBrowsersBeforeAnythingElse(): void
+    {
+        $tag = $this->enabled(['beforeSend' => 'myFn'])->beforeSendTag();
+
+        $this->assertStringStartsWith(
+            '<script>window.akibeoUmamiBeforeSend=function(t,p){var n="myFn";'
+            . 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))return false;try{',
+            $tag
+        );
+    }
+
+    public function testHelperWithOnlyExcludeBots(): void
+    {
+        $umami = $this->enabled(['utmFromClickIds' => false]);
+
+        $this->assertSame('akibeoUmamiBeforeSend', $umami->scriptAttributes()['data-before-send']);
+        $this->assertSame(
+            '<script>window.akibeoUmamiBeforeSend=function(t,p){var n=null;'
+            . 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))return false;'
+            . 'return n&&"function"==typeof window[n]?window[n](t,p):p};</script>',
+            $umami->beforeSendTag()
+        );
+    }
+
+    public function testHelperWithOnlyUtmFromClickIds(): void
+    {
+        $tag = $this->enabled(['excludeBots' => false])->beforeSendTag();
+
+        $this->assertStringStartsWith('<script>window.akibeoUmamiBeforeSend=function(t,p){var n=null;try{', $tag);
+        $this->assertStringNotContainsString('webdriver', $tag);
+        $this->assertStringContainsString('"gclid"', $tag);
+    }
+
+    public function testNoHelperWhenBothAreOff(): void
+    {
+        $umami = $this->enabled(['excludeBots' => false, 'utmFromClickIds' => false]);
+
+        $this->assertSame('', $umami->beforeSendTag());
+        $this->assertNull($umami->beforeSendName());
+    }
+
     public function testClickIdHelperChainsToBeforeSendAndTakesTheNonce(): void
     {
         $umami = $this->enabled(['beforeSend' => ' my</script>Fn ', 'nonce' => 'n1']);
@@ -61,11 +102,11 @@ class UmamiTest extends TestCase
 
     public function testBeforeSendOptionAloneIsPassedThrough(): void
     {
-        $umami = $this->enabled(['utmFromClickIds' => false, 'beforeSend' => 'myFn']);
+        $umami = $this->enabled(['utmFromClickIds' => false, 'excludeBots' => false, 'beforeSend' => 'myFn']);
 
         $this->assertSame('', $umami->beforeSendTag());
         $this->assertSame('myFn', $umami->scriptAttributes()['data-before-send']);
-        $this->assertArrayNotHasKey('data-before-send', $this->enabled(['utmFromClickIds' => false])->scriptAttributes());
+        $this->assertArrayNotHasKey('data-before-send', $this->enabled(['utmFromClickIds' => false, 'excludeBots' => false])->scriptAttributes());
     }
 
     public function testScriptTagIsSkippedInDebugUnlessTrackInDebug(): void
@@ -84,6 +125,7 @@ class UmamiTest extends TestCase
             'excludeSearch' => true,
             'excludeHash' => true,
             'utmFromClickIds' => false,
+            'excludeBots' => false,
         ])->scriptAttributes();
 
         $this->assertSame([

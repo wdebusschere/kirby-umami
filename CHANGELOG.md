@@ -19,6 +19,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `excludeBots` (on by default): the inline before-send helper cancels the
+  send when the browser reports itself as automated (`navigator.webdriver`,
+  or `HeadlessChrome` in the user agent), so Puppeteer, Playwright and
+  Selenium scrapers no longer count as visitors. The helper is now printed
+  when either `excludeBots` or `utmFromClickIds` is on (#11).
 - `utmFromClickIds` (on by default): an inline helper registered as Umami's
   `data-before-send` adds `utm_source`/`utm_medium=cpc` (and `utm_campaign`
   from `gad_campaignid`) to the tracked URL when an auto-tagged ad click
