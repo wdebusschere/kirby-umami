@@ -46,7 +46,7 @@ return [
         'autoTrack' => true,       // false: only events you send with umami.track() in JS
         'domains' => [],           // only track on these hostnames
         'tag' => null,             // tag every view, to filter in the dashboard
-        'excludeSearch' => false,  // drop ?query from tracked URLs
+        'excludeSearch' => false,  // drop ?query from tracked URLs, except utm_*
         'excludeHash' => false,    // drop #hash from tracked URLs
         'excludeBots' => true,     // don't track automated/headless browsers (see note)
         'utmFromClickIds' => true, // file auto-tagged ad clicks under utm_source/utm_medium (see note)
@@ -136,8 +136,8 @@ URL Umami receives whenever it sees a paid click ID and no `utm_source`:
 
 Manual UTM tags always win, the browser URL is not changed and the click ID
 still reaches Umami. The helper carries the same nonce as the tracker. With
-`excludeSearch` on, the tracker strips the query before the helper runs, so
-there is nothing to pick up. Set `beforeSend` to the name of your own global
+`excludeSearch` on, the helper drops every query parameter except `utm_*`
+(after adding the tags derived from click IDs), so campaigns stay trackable. Set `beforeSend` to the name of your own global
 function to run it after the helper (or instead of it, when both
 `excludeBots` and `utmFromClickIds` are off).
 

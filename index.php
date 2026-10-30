@@ -21,7 +21,7 @@ Kirby::plugin('akibeo/umami', [
         'autoTrack' => true,         // false: only events sent by umami.track() from your own JS
         'domains' => [],             // only track on these hostnames (Umami's data-domains)
         'tag' => null,               // Umami's data-tag, to filter views in the dashboard
-        'excludeSearch' => false,    // drop the query string from tracked URLs
+        'excludeSearch' => false,    // drop the query string from tracked URLs, except utm_*
         'excludeHash' => false,      // drop the hash from tracked URLs
         'excludeBots' => true,       // don't track automated browsers (navigator.webdriver, HeadlessChrome)
         'utmFromClickIds' => true,   // file auto-tagged ad clicks (gclid, msclkid, …) under utm_source/utm_medium

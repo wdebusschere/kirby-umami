@@ -152,10 +152,6 @@ class Umami
             $attrs['data-tag'] = $tag;
         }
 
-        if ($this->option('excludeSearch', false) === true) {
-            $attrs['data-exclude-search'] = 'true';
-        }
-
         if ($this->option('excludeHash', false) === true) {
             $attrs['data-exclude-hash'] = 'true';
         }
@@ -189,6 +185,11 @@ class Umami
         return $this->option('utmFromClickIds', true) === true;
     }
 
+    public function excludeSearch(): bool
+    {
+        return $this->option('excludeSearch', false) === true;
+    }
+
     public function excludeBots(): bool
     {
         return $this->option('excludeBots', true) === true;
@@ -196,11 +197,11 @@ class Umami
 
     protected function hasBeforeSendHelper(): bool
     {
-        return $this->excludeBots() === true || $this->utmFromClickIds() === true;
+        return $this->excludeBots() === true || $this->utmFromClickIds() === true || $this->excludeSearch() === true;
     }
 
     /**
-     * The inline helper behind `excludeBots` and `utmFromClickIds`.
+     * The inline helper behind `excludeBots`, `utmFromClickIds` and `excludeSearch`.
      *
      * `excludeBots` cancels the send (Umami drops the event when the
      * before-send function returns a falsy value) in browsers that report
@@ -216,6 +217,11 @@ class Umami
      * only files visits under campaigns by their UTM parameters, so
      * auto-tagged ad clicks would otherwise never show up there. The real
      * URL in the browser is untouched; Umami still gets the click ID too.
+     *
+     * `excludeSearch`: strips the query from the tracked URL but keeps the
+     * utm_* parameters (Umami's own `data-exclude-search` would drop those
+     * too, and campaigns could no longer be told apart). It runs after
+     * `utmFromClickIds`, so tags derived from click IDs survive as well.
      *
      * Empty string when the helper is off.
      */
@@ -241,7 +247,13 @@ try{if(p&&p.url){var u=new URL(p.url,location.href),q=u.searchParams;if(!q.has("
 JS
             : '';
 
-        $js = 'window.' . $name . '=function(t,p){var n=' . $next . ';' . $bots . $utm
+        $search = $this->excludeSearch() === true
+            ? <<<'JS'
+try{if(p&&p.url){var u=new URL(p.url,location.href),q=u.searchParams;Array.from(q.keys()).forEach(function(k){/^utm_/i.test(k)||q.delete(k)});p.url=/^[a-z][a-z0-9+.-]*:/i.test(p.url)?u.href:u.pathname+u.search+u.hash}}catch(e){}
+JS
+            : '';
+
+        $js = 'window.' . $name . '=function(t,p){var n=' . $next . ';' . $bots . $utm . $search
             . 'return n&&"function"==typeof window[n]?window[n](t,p):p};';
 
         return '<script' . $nonce . '>' . $js . '</script>';
