@@ -136,9 +136,18 @@ class UmamiTest extends TestCase
             'data-auto-track' => 'false',
             'data-domains' => 'example.com,www.example.com',
             'data-tag' => 'campaign',
-            'data-exclude-search' => 'true',
             'data-exclude-hash' => 'true',
+            'data-before-send' => 'akibeoUmamiBeforeSend',
         ], $attrs);
+    }
+
+    public function testExcludeSearchKeepsUtmParametersViaTheHelper(): void
+    {
+        $umami = $this->enabled(['excludeSearch' => true, 'utmFromClickIds' => false, 'excludeBots' => false]);
+
+        $this->assertArrayNotHasKey('data-exclude-search', $umami->scriptAttributes());
+        $this->assertSame('akibeoUmamiBeforeSend', $umami->beforeSendName());
+        $this->assertStringContainsString('/^utm_/i.test(k)||q.delete(k)', $umami->beforeSendTag());
     }
 
     public function testDomainsAcceptACommaSeparatedString(): void

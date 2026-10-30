@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `excludeSearch` keeps the `utm_*` parameters. It used Umami's
+  `data-exclude-search`, which drops the whole query and so every campaign
+  tag; the plugin's before-send helper now removes everything but `utm_*` (#13).
+
 - The Analytics view is readable in the Panel's dark theme: cards, the
   period toggle, badges, bars and tables now use theme-aware colours
   instead of fixed white and light greys, which hid the numbers on a dark
