@@ -112,11 +112,10 @@ inflate the numbers several times over. With `excludeBots` on (the default)
 the tag carries a small inline helper, registered as Umami's
 `data-before-send`, that cancels every send when the browser reports itself
 as automated: `navigator.webdriver` is `true` (Puppeteer, Playwright,
-Selenium), the user agent contains `HeadlessChrome`, or `navigator.languages`
-is empty (old headless Chrome). No real visitor matches any of these, so
-there are no false positives, but stealth setups hide them and still get
-through. This only stops new hits; Umami cannot remove what it has already
-recorded.
+Selenium) or the user agent contains `HeadlessChrome`. No real visitor
+matches either, so there are no false positives, but stealth setups hide
+both and still get through. This only stops new hits; Umami cannot remove
+what it has already recorded.
 
 ### Stealth bots: `requireEngagement`
 

@@ -54,7 +54,7 @@ class UmamiTest extends TestCase
 
         $this->assertStringStartsWith(
             '<script>window.akibeoUmamiBeforeSend=function(t,p){var n="myFn";'
-            . 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent)||!(navigator.languages&&navigator.languages.length))return false;try{',
+            . 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))return false;try{',
             $tag
         );
     }
@@ -66,7 +66,7 @@ class UmamiTest extends TestCase
         $this->assertSame('akibeoUmamiBeforeSend', $umami->scriptAttributes()['data-before-send']);
         $this->assertSame(
             '<script>window.akibeoUmamiBeforeSend=function(t,p){var n=null;'
-            . 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent)||!(navigator.languages&&navigator.languages.length))return false;'
+            . 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))return false;'
             . 'return n&&"function"==typeof window[n]?window[n](t,p):p};</script>',
             $umami->beforeSendTag()
         );

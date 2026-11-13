@@ -231,8 +231,8 @@ class Umami
      * `excludeBots` cancels the send (Umami drops the event when the
      * before-send function returns a falsy value) in browsers that report
      * themselves as automated: `navigator.webdriver` is set by Puppeteer,
-     * Playwright and Selenium, headless Chrome says so in its user agent,
-     * and old headless Chrome reports no `navigator.languages`. Neither is ever true for a real visitor. Stealth setups
+     * Playwright and Selenium, and headless Chrome says so in its
+     * user agent. Neither is ever true for a real visitor. Stealth setups
      * hide both, so this catches the careless share of scrapers only.
      *
      * `utmFromClickIds`: when the tracked URL carries a paid click ID
@@ -274,7 +274,7 @@ class Umami
             : '';
 
         $bots = $this->excludeBots() === true
-            ? 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent)||!(navigator.languages&&navigator.languages.length))return false;'
+            ? 'if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))return false;'
             : '';
         $utm = $this->utmFromClickIds() === true
             ? <<<'JS'
