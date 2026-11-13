@@ -24,6 +24,7 @@ Kirby::plugin('akibeo/umami', [
         'excludeSearch' => false,    // drop the query string from tracked URLs, except utm_*
         'excludeHash' => false,      // drop the hash from tracked URLs
         'excludeBots' => true,       // don't track automated browsers (navigator.webdriver, HeadlessChrome)
+        'requireEngagement' => false, // true or ms: hold the landing pageview until a human signal (Umami v3)
         'utmFromClickIds' => true,   // file auto-tagged ad clicks (gclid, msclkid, …) under utm_source/utm_medium
         'beforeSend' => null,        // name of a global JS function (type, payload) => payload, Umami's data-before-send
         'trackInDebug' => false,     // also load the tracker while Kirby's debug option is on

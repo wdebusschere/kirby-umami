@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `requireEngagement` (off by default): holds the landing pageview until the
+  visitor scrolls, moves the pointer, touches, types or keeps the tab visible
+  for 4 s (or the ms you set), and drops it when the page closes first. Stops
+  stealth headless scrapers that `excludeBots` cannot see; real visitors who
+  leave without engaging are no longer counted either. Needs Umami v3 (#17).
+- `excludeBots` also cancels browsers that report no `navigator.languages`
+  (old headless Chrome).
+
 ### Fixed
 
 - `excludeSearch` keeps the `utm_*` parameters. It used Umami's
