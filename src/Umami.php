@@ -165,7 +165,8 @@ class Umami
 
     /**
      * Name of the global JS function Umami calls before every send: the
-     * plugin's own helper while `excludeBots` or `utmFromClickIds` is on (it
+     * plugin's own helper while `excludeBots`, `utmFromClickIds`, `excludeSearch`
+     * or `requireEngagement` is on (it
      * chains to the `beforeSend` option), otherwise the `beforeSend` option
      * itself.
      */
@@ -195,13 +196,37 @@ class Umami
         return $this->option('excludeBots', true) === true;
     }
 
+    /**
+     * Milliseconds the tab must be visible before a held landing pageview
+     * is sent without interaction, or null while `requireEngagement` is off.
+     * `true` means the default of 4000 ms; an int sets the delay.
+     */
+    public function requireEngagement(): ?int
+    {
+        $value = $this->option('requireEngagement', false);
+
+        if ($value === true) {
+            return 4000;
+        }
+
+        if (is_int($value) === true && $value > 0) {
+            return $value;
+        }
+
+        return null;
+    }
+
     protected function hasBeforeSendHelper(): bool
     {
-        return $this->excludeBots() === true || $this->utmFromClickIds() === true || $this->excludeSearch() === true;
+        return $this->excludeBots() === true
+            || $this->utmFromClickIds() === true
+            || $this->excludeSearch() === true
+            || $this->requireEngagement() !== null;
     }
 
     /**
-     * The inline helper behind `excludeBots`, `utmFromClickIds` and `excludeSearch`.
+     * The inline helper behind `excludeBots`, `utmFromClickIds`, `excludeSearch`
+     * and `requireEngagement`.
      *
      * `excludeBots` cancels the send (Umami drops the event when the
      * before-send function returns a falsy value) in browsers that report
@@ -217,6 +242,16 @@ class Umami
      * only files visits under campaigns by their UTM parameters, so
      * auto-tagged ad clicks would otherwise never show up there. The real
      * URL in the browser is untouched; Umami still gets the click ID too.
+     *
+     * `requireEngagement`: holds pageviews (Umami sends them as `event`
+     * payloads without a `name`) until the visitor shows a human signal:
+     * the first pointer, touch, key, scroll or wheel event, or the tab
+     * being visible for the configured number of milliseconds (the timer
+     * restarts whenever the tab is hidden and shown again). The helper then
+     * returns a Promise, which Umami v3 awaits; when the page closes before
+     * a signal, the pageview is never sent. Named events pass straight
+     * through. The listeners are attached while this inline script runs,
+     * before the deferred tracker sends its first pageview.
      *
      * `excludeSearch`: strips the query from the tracked URL but keeps the
      * utm_* parameters (Umami's own `data-exclude-search` would drop those
@@ -253,8 +288,19 @@ try{if(p&&p.url){var u=new URL(p.url,location.href),q=u.searchParams;Array.from(
 JS
             : '';
 
-        $js = 'window.' . $name . '=function(t,p){var n=' . $next . ';' . $bots . $utm . $search
-            . 'return n&&"function"==typeof window[n]?window[n](t,p):p};';
+        $rest = $utm . $search . 'return n&&"function"==typeof window[n]?window[n](t,p):p';
+
+        if (($wait = $this->requireEngagement()) !== null) {
+            $gate = <<<'JS'
+var h=0,w=[],c,d=document,E=["pointerdown","pointermove","touchstart","keydown","scroll","wheel"],o={capture:!0,passive:!0};function g(){if(h)return;h=1;clearTimeout(c);E.forEach(function(e){removeEventListener(e,g,o)});d.removeEventListener("visibilitychange",v);w.splice(0).forEach(function(r){r()})}function v(){clearTimeout(c);"visible"===d.visibilityState&&(c=setTimeout(g,WAIT))}E.forEach(function(e){addEventListener(e,g,o)});d.addEventListener("visibilitychange",v);v();
+JS;
+            $js = '(function(){' . str_replace('WAIT', (string)$wait, $gate)
+                . 'window.' . $name . '=function(t,p){var n=' . $next . ';' . $bots
+                . 'var f=function(){' . $rest . '};'
+                . 'return h||"event"!==t||p&&p.name?f():new Promise(function(r){w.push(r)}).then(f)}})();';
+        } else {
+            $js = 'window.' . $name . '=function(t,p){var n=' . $next . ';' . $bots . $rest . '};';
+        }
 
         return '<script' . $nonce . '>' . $js . '</script>';
     }

@@ -49,6 +49,7 @@ return [
         'excludeSearch' => false,  // drop ?query from tracked URLs, except utm_*
         'excludeHash' => false,    // drop #hash from tracked URLs
         'excludeBots' => true,     // don't track automated/headless browsers (see note)
+        'requireEngagement' => false, // true or ms: only count visitors who engage (see note)
         'utmFromClickIds' => true, // file auto-tagged ad clicks under utm_source/utm_medium (see note)
         'beforeSend' => null,      // name of your own (type, payload) => payload JS function
 
@@ -88,7 +89,7 @@ Keep secrets (`apiKey`, `password`) in a host config
 ### Content-Security-Policy
 
 With [akibeo/kirby-csp](https://github.com/wdebusschere/kirby-csp) the script
-tag and the inline before-send helper (`excludeBots`, `utmFromClickIds`) carry the per-request nonce, so
+tag and the inline before-send helper (`excludeBots`, `utmFromClickIds`, `requireEngagement`, …) carry the per-request nonce, so
 `script-src` needs nothing extra. The
 tracker posts to `/api/send` on the Umami host, so add that host to
 `connect-src`:
@@ -116,6 +117,36 @@ matches either, so there are no false positives, but stealth setups hide
 both and still get through. This only stops new hits; Umami cannot remove
 what it has already recorded.
 
+### Stealth bots: `requireEngagement`
+
+Stealth scrapers look like an ordinary Windows + Chrome visitor, but they
+load the page, fire the pageview and leave within a second or two without
+touching it (typically from data-centre locations, no referrer, odd screen
+sizes, ~100 % bounce). With `requireEngagement` on, the helper **holds the
+landing pageview** until the visitor shows a human signal and drops it when
+the page closes first:
+
+```php
+'akibeo.umami' => [
+    'requireEngagement' => true, // or the ms the tab must be visible, default 4000
+],
+```
+
+- A signal is the first `pointerdown`, `pointermove`, `touchstart`,
+  `keydown`, `scroll` or `wheel`, or the tab having been visible for the
+  set time (the timer restarts when the tab is hidden and shown again).
+- Only pageviews are held; named events (`umami.track('…')`, data attributes)
+  are sent straight away. Later pageviews are not held once a signal arrived.
+- `excludeBots` still cancels automated browsers outright.
+- Needs Umami v3 (Umami Cloud, or self-hosted v3+), which awaits the
+  before-send function. Older trackers do not, so leave it off there.
+
+**Trade-off:** real visitors who leave within the delay without touching the
+page are no longer counted either, so visitor and pageview totals drop
+compared to before, and bounce rate and visit time shift. That is the point,
+but mention it when reporting numbers to clients, and compare periods on the
+same side of the switch.
+
 ### Ad clicks without UTM parameters
 
 Umami files a visit under a campaign only by its `utm_*` parameters. Google
@@ -138,8 +169,8 @@ Manual UTM tags always win, the browser URL is not changed and the click ID
 still reaches Umami. The helper carries the same nonce as the tracker. With
 `excludeSearch` on, the helper drops every query parameter except `utm_*`
 (after adding the tags derived from click IDs), so campaigns stay trackable. Set `beforeSend` to the name of your own global
-function to run it after the helper (or instead of it, when both
-`excludeBots` and `utmFromClickIds` are off).
+function to run it after the helper (or instead of it, when `excludeBots`,
+`utmFromClickIds`, `excludeSearch` and `requireEngagement` are all off).
 
 ### `trackPanelUsers` and the pages cache
 

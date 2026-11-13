@@ -150,6 +150,49 @@ class UmamiTest extends TestCase
         $this->assertStringContainsString('/^utm_/i.test(k)||q.delete(k)', $umami->beforeSendTag());
     }
 
+    public function testHelperHasNoEngagementGateByDefault(): void
+    {
+        $umami = $this->enabled();
+
+        $this->assertNull($umami->requireEngagement());
+        $this->assertStringNotContainsString('visibilitychange', $umami->beforeSendTag());
+        $this->assertStringNotContainsString('Promise', $umami->beforeSendTag());
+    }
+
+    public function testRequireEngagementHoldsPageviewsUntilAHumanSignal(): void
+    {
+        $umami = $this->enabled(['requireEngagement' => true]);
+        $tag = $umami->beforeSendTag();
+
+        $this->assertSame(4000, $umami->requireEngagement());
+        $this->assertStringStartsWith('<script>(function(){var h=0,w=[]', $tag);
+        $this->assertStringEndsWith('})();</script>', $tag);
+        $this->assertStringContainsString('"pointerdown","pointermove","touchstart","keydown","scroll","wheel"', $tag);
+        $this->assertStringContainsString('c=setTimeout(g,4000)', $tag);
+        $this->assertStringContainsString('return h||"event"!==t||p&&p.name?f():new Promise(', $tag);
+        // Bots are still cancelled outright, before anything is held.
+        $this->assertMatchesRegularExpression('/navigator\.webdriver.*return false;var f=function\(\)\{/', $tag);
+    }
+
+    public function testRequireEngagementTakesTheDelayAsAnInt(): void
+    {
+        $umami = $this->enabled(['requireEngagement' => 2500]);
+
+        $this->assertSame(2500, $umami->requireEngagement());
+        $this->assertStringContainsString('c=setTimeout(g,2500)', $umami->beforeSendTag());
+        $this->assertNull($this->enabled(['requireEngagement' => 0])->requireEngagement());
+    }
+
+    public function testRequireEngagementAloneRegistersTheHelper(): void
+    {
+        $umami = $this->enabled(['requireEngagement' => true, 'excludeBots' => false, 'utmFromClickIds' => false, 'beforeSend' => 'myFn']);
+        $tag = $umami->beforeSendTag();
+
+        $this->assertSame('akibeoUmamiBeforeSend', $umami->beforeSendName());
+        $this->assertStringNotContainsString('webdriver', $tag);
+        $this->assertStringContainsString('var n="myFn";var f=function(){return n&&"function"==typeof window[n]?window[n](t,p):p};', $tag);
+    }
+
     public function testDomainsAcceptACommaSeparatedString(): void
     {
         $attrs = $this->enabled(['domains' => 'a.com, b.com,,'])->scriptAttributes();
